@@ -101,7 +101,8 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
 Sx = np.linspace(0, 10, 100).reshape(-1, 1)
 Sy = (np.sin(Sx * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 Tx = np.linspace(0, 10, 100).reshape(-1, 1)
-Ty = (np.sin((Tx+1) * 2) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+f = 1 * np.exp(Tx*0.05)
+Ty = (np.sin(Tx*f) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 plt.plot(Sx, Sy)
 plt.plot(Tx, Ty)
 plt.show()
@@ -113,7 +114,7 @@ opt.minimize(at_gpr.training_loss, at_gpr.trainable_variables)
 gpf.utilities.print_summary(at_gpr)
 print("Training loss value:", at_gpr.training_loss().numpy())
 
-print("Lambda is:", 2 * (1/(1 + at_gpr.kernel.mu)) ** at_gpr.kernel.b - 1)
+print("Lambda is:", at_gpr.kernel.lmb.numpy())
 
 Xplot = np.linspace(0, 10, 100).reshape(-1, 1).astype(float)
 
