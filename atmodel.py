@@ -101,7 +101,7 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         
 # Test here because why not.       
 Sx = np.linspace(0, 10, 100).reshape(-1, 1)
-Sy = 1*Sx#(np.sin(Sx * 2) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+Sy = Sx**3#(np.sin(Sx * 2) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 Tx = np.linspace(0, 10, 100).reshape(-1, 1)
 Ty = (np.sin((Tx+1) * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 plt.plot(Sx, Sy)
