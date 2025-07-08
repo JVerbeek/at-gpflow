@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 from gpflow.models.training_mixins import InternalDataTrainingLossMixin
 import matplotlib.pyplot as plt
+from atlikelihood import TransferLikelihood
 gpf.config.set_default_jitter(0.001)
 
 class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
@@ -11,9 +12,15 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         self.kernel = TransferKernel(1, 1, base_kernel)
         self.data_source = gpf.models.util.data_input_to_tensor(data_source)
         self.data_target = gpf.models.util.data_input_to_tensor(data_source)
-        self.likelihood_source = gpf.likelihoods.Gaussian()
-        self.likelihood_target = gpf.likelihoods.Gaussian()
         self.mean_function = gpf.mean_functions.Zero()
+        super().__init__(
+            kernel=self.kernel,
+            likelihood=TransferLikelihood(
+                source=gpf.likelihoods.Gaussian(variance=0.01), target=gpf.likelihoods.Gaussian(variance=0.01)
+            ),
+            mean_function=self.mean_function,
+            num_latent_gps=1
+        )
         
     def maximum_log_likelihood_objective(self):
         return self.adaptive_log_marginal_likelihood()
@@ -22,10 +29,10 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Sx, Sy = self.data_source
         Tx, Ty = self.data_target
         
-        Kss = self.kernel.kernel(Sx, Sx) + self.likelihood_source.variance * tf.eye(tf.shape(Sx)[0], dtype=Sx.dtype)
+        Kss = self.kernel.kernel(Sx, Sx) + self.likelihood.source.variance * tf.eye(tf.shape(Sx)[0], dtype=Sx.dtype)
         Kst = self.kernel.interdomain(Sx, Tx)
         Kts = tf.linalg.matrix_transpose(Kst)
-        Ktt = self.kernel.kernel(Tx, Tx) + self.likelihood_target.variance * tf.eye(tf.shape(Tx)[0], dtype=Tx.dtype)
+        Ktt = self.kernel.kernel(Tx, Tx) + self.likelihood.target.variance * tf.eye(tf.shape(Tx)[0], dtype=Tx.dtype)
         
         Lss = tf.linalg.cholesky(Kss)
         
@@ -76,7 +83,7 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Cst = self.kernel.interdomain(Sx, Tx)
         Ctt = self.kernel.kernel(Tx, Tx)
         Kmm = tf.concat((tf.concat((Css, Cst), 0), tf.concat((tf.linalg.matrix_transpose(Cst), Ctt), 0)), 1)
-        kmm_plus_s = Kmm + tf.concat((self.likelihood_source.variance_at(Sx), self.likelihood_target.variance_at(Tx)), 0)
+        kmm_plus_s = Kmm + tf.concat((self.likelihood.source.variance_at(Sx), self.likelihood.target.variance_at(Tx)), 0)
         
         # Construct Kmn
         Ks = self.kernel.interdomain(Xnew, Sx)
