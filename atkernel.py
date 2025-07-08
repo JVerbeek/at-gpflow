@@ -2,13 +2,12 @@ import gpflow as gpf
 from gpflow.kernels import Kernel
 import tensorflow as tf
 import numpy as np
-
+import tensorflow_probability as tfp
 class TransferKernel(Kernel):
     def __init__(self, mu, b, kernel):
         super().__init__()
-        #self.mu = gpf.Parameter(mu)
-       # self.b = gpf.Parameter(b)
-        self.lmb = gpf.Parameter(2 * (1/(1 + mu)) ** b - 1)
+        self.mu = gpf.Parameter(5, transform=tfp.bijectors.Exp())
+        self.b = gpf.Parameter(0.5, transform=tfp.bijectors.Exp())
         self.kernel = kernel
         
     def interdomain(self, X, X2):
@@ -17,13 +16,12 @@ class TransferKernel(Kernel):
         Returns:
             _description_
         """
-        #lmb = 2 * (1/(1 + self.mu)) ** self.b - 1
-        return self.lmb * self.kernel(X, X2) 
+        lmb = 2 * ((1/(1 + self.mu)) ** self.b) - 1
+        return lmb * self.kernel(X, X2) 
     
     def K(self, X, X2, source_length=None, full_output_cov=False):
         Sx, Tx = X[:source_length], X[source_length:]
         Kss = self.kernel(Sx, Sx)
-        print("XX okay")
         if X2 == None: 
             return Kss
         else:

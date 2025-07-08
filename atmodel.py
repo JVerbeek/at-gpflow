@@ -5,11 +5,11 @@ import numpy as np
 from gpflow.models.training_mixins import InternalDataTrainingLossMixin
 import matplotlib.pyplot as plt
 from atlikelihood import TransferLikelihood
-gpf.config.set_default_jitter(0.00001)
+gpf.config.set_default_jitter(0.1)
 
 class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
     def __init__(self, data_source, data_target, base_kernel):
-        self.kernel = TransferKernel(1, 1, base_kernel)
+        self.kernel = TransferKernel(4, 0.2,  base_kernel)
         self.data_source = gpf.models.util.data_input_to_tensor(data_source)
         self.data_target = gpf.models.util.data_input_to_tensor(data_target)
         self.mean_function = gpf.mean_functions.Zero()
@@ -40,18 +40,16 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         V = tf.linalg.triangular_solve(Lss, Kst, lower=True)
         
         mu_t = tf.matmul(V, A, transpose_a=True)
-        C_t = Ktt - tf.matmul(Kts, V, transpose_a=True)
-        
+        C_t = Ktt - tf.matmul(Kts, V)
         L_t = tf.linalg.cholesky(C_t)
-        
         logdet_t = tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
         
         delta = Ty - mu_t
         alpha_t = tf.linalg.triangular_solve(L_t, delta, lower=True)
         
         n_target = tf.cast(tf.shape(Tx)[0], Sx.dtype)
-        lml = -0.5 * logdet_t - 0.5 *(tf.reduce_sum(tf.square(alpha_t)) + 
-                    n_target * tf.cast(tf.math.log(2*np.pi), Sx.dtype))
+        
+        lml = -0.5 * (logdet_t + tf.reduce_sum(tf.square(alpha_t)) + n_target * tf.cast(tf.math.log(2*np.pi), Sx.dtype))
         return tf.squeeze(lml)
         
 
@@ -75,13 +73,13 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         
         # Construct Knn
         knn = self.kernel.kernel(Xnew, full_cov=full_cov) + tf.squeeze(self.likelihood.target.variance_at(Xnew))
+        
 
         # Construct the kernel matrix Kmm
         Css = self.kernel.kernel(Sx, Sx)
         Cst = self.kernel.interdomain(Sx, Tx)
         Ctt = self.kernel.kernel(Tx, Tx)
         Kmm = tf.concat((tf.concat((Css, Cst), 0), tf.concat((tf.linalg.matrix_transpose(Cst), Ctt), 0)), 1)
-        print("Kmm shape:", Kmm.shape, tf.linalg.diag(tf.concat((self.likelihood.source.variance_at(Sx), self.likelihood.target.variance_at(Tx)), 0)).shape)
         noise = tf.squeeze(tf.linalg.diag(tf.concat((self.likelihood.source.variance_at(Sx), self.likelihood.target.variance_at(Tx)), 0)))
         kmm_plus_s = Kmm + tf.linalg.diag(noise)
         
@@ -97,27 +95,30 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         f_mean = f_mean_zero + self.mean_function(Xnew)
         return f_mean, f_var
         
-# Test here because why not.       
+# Tests      
 Sx = np.linspace(0, 10, 100).reshape(-1, 1)
 Sy = (np.sin(Sx * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
-Tx = np.linspace(0, 10, 100).reshape(-1, 1)
-f = 1 * np.exp(Tx*0.05)
-Ty = (np.sin(Tx*f) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+Tx = np.linspace(0.5, 10.5, 100).reshape(-1, 1)
+
+f = 1 * np.exp(Tx*0.2)  # Change 0.2 to something else to get a more/less similar target
+Ty = (np.sin(Tx) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 plt.plot(Sx, Sy)
 plt.plot(Tx, Ty)
 plt.show()
 at_gpr = AdaptiveTransferGPR((Sx, Sy), (Tx, Ty), gpf.kernels.RBF())
 
-print("Training loss value:", at_gpr.training_loss().numpy())
+print("Training loss value before training:", at_gpr.training_loss().numpy())
 opt = gpf.optimizers.Scipy()
 opt.minimize(at_gpr.training_loss, at_gpr.trainable_variables)
 gpf.utilities.print_summary(at_gpr)
-print("Training loss value:", at_gpr.training_loss().numpy())
+print("Training loss value after training:", at_gpr.training_loss().numpy())
 
-print("Lambda is:", at_gpr.kernel.lmb.numpy())
+print("Lambda is:", 2 * ((1/(1 + at_gpr.kernel.mu)) ** at_gpr.kernel.b) - 1)
+
 
 Xplot = np.linspace(0, 10, 100).reshape(-1, 1).astype(float)
-
+plt.imshow(at_gpr.kernel(Xplot))
+plt.show()
 f_mean, f_var = at_gpr.predict_f(Xplot)
 y_mean, y_var = at_gpr.predict_y(Xplot)
 print(f_mean.shape, f_var.shape)
