@@ -5,13 +5,13 @@ import numpy as np
 from gpflow.models.training_mixins import InternalDataTrainingLossMixin
 import matplotlib.pyplot as plt
 from atlikelihood import TransferLikelihood
-gpf.config.set_default_jitter(0.001)
+gpf.config.set_default_jitter(0.00001)
 
 class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
     def __init__(self, data_source, data_target, base_kernel):
         self.kernel = TransferKernel(1, 1, base_kernel)
         self.data_source = gpf.models.util.data_input_to_tensor(data_source)
-        self.data_target = gpf.models.util.data_input_to_tensor(data_source)
+        self.data_target = gpf.models.util.data_input_to_tensor(data_target)
         self.mean_function = gpf.mean_functions.Zero()
         super().__init__(
             kernel=self.kernel,
@@ -29,10 +29,10 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Sx, Sy = self.data_source
         Tx, Ty = self.data_target
         
-        Kss = self.kernel.kernel(Sx, Sx) + self.likelihood.source.variance * tf.eye(tf.shape(Sx)[0], dtype=Sx.dtype)
+        Kss = self.kernel.kernel(Sx, Sx) + tf.linalg.diag(tf.squeeze(self.likelihood.source.variance_at(Sx)))
         Kst = self.kernel.interdomain(Sx, Tx)
         Kts = tf.linalg.matrix_transpose(Kst)
-        Ktt = self.kernel.kernel(Tx, Tx) + self.likelihood.target.variance * tf.eye(tf.shape(Tx)[0], dtype=Tx.dtype)
+        Ktt = self.kernel.kernel(Tx, Tx) + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Tx)))
         
         Lss = tf.linalg.cholesky(Kss)
         
@@ -50,10 +50,8 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         alpha_t = tf.linalg.triangular_solve(L_t, delta, lower=True)
         
         n_target = tf.cast(tf.shape(Tx)[0], Sx.dtype)
-        lml = -0.5 * (tf.reduce_sum(tf.square(alpha_t)) + 
-                    n_target * tf.cast(tf.math.log(2*np.pi), Sx.dtype) + 
-                    2 * logdet_t)
-        
+        lml = -0.5 * logdet_t - 0.5 *(tf.reduce_sum(tf.square(alpha_t)) + 
+                    n_target * tf.cast(tf.math.log(2*np.pi), Sx.dtype))
         return tf.squeeze(lml)
         
 
@@ -90,7 +88,7 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         # Construct Kmn
         Ks = self.kernel.interdomain(Xnew, Sx)
         Kt = self.kernel.kernel(Xnew, Tx)
-        kmn = tf.concat((Ks, Kt), 0)
+        kmn = tf.linalg.matrix_transpose(tf.concat((Ks, Kt), 1))
 
         conditional = gpf.conditionals.base_conditional
         f_mean_zero, f_var = conditional(
@@ -101,19 +99,19 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         
 # Test here because why not.       
 Sx = np.linspace(0, 10, 100).reshape(-1, 1)
-Sy = Sx**3#(np.sin(Sx * 2) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+Sy = (np.sin(Sx * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 Tx = np.linspace(0, 10, 100).reshape(-1, 1)
-Ty = (np.sin((Tx+1) * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+Ty = (np.sin((Tx+1) * 2) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
 plt.plot(Sx, Sy)
 plt.plot(Tx, Ty)
 plt.show()
 at_gpr = AdaptiveTransferGPR((Sx, Sy), (Tx, Ty), gpf.kernels.RBF())
 
 print("Training loss value:", at_gpr.training_loss().numpy())
-at_gpr.training_loss()
 opt = gpf.optimizers.Scipy()
 opt.minimize(at_gpr.training_loss, at_gpr.trainable_variables)
 gpf.utilities.print_summary(at_gpr)
+print("Training loss value:", at_gpr.training_loss().numpy())
 
 print("Lambda is:", 2 * (1/(1 + at_gpr.kernel.mu)) ** at_gpr.kernel.b - 1)
 
