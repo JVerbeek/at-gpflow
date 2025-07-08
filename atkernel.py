@@ -6,8 +6,9 @@ import numpy as np
 class TransferKernel(Kernel):
     def __init__(self, mu, b, kernel):
         super().__init__()
-        self.mu = gpf.Parameter(mu)
-        self.b = gpf.Parameter(b)
+        #self.mu = gpf.Parameter(mu)
+       # self.b = gpf.Parameter(b)
+        self.lmb = gpf.Parameter(2 * (1/(1 + mu)) ** b - 1)
         self.kernel = kernel
         
     def interdomain(self, X, X2):
@@ -16,8 +17,8 @@ class TransferKernel(Kernel):
         Returns:
             _description_
         """
-        lmb = 2 * (1/(1 + self.mu)) ** self.b - 1
-        return lmb * self.kernel(X, X2) 
+        #lmb = 2 * (1/(1 + self.mu)) ** self.b - 1
+        return self.lmb * self.kernel(X, X2) 
     
     def K(self, X, X2, source_length=None, full_output_cov=False):
         Sx, Tx = X[:source_length], X[source_length:]
