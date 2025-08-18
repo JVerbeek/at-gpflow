@@ -19,20 +19,24 @@ class TransferKernel(Kernel):
         lmb = 2 * ((1/(1 + self.mu)) ** self.b) - 1
         return lmb * self.kernel(X, X2) 
     
-    def K(self, X, X2, source_length=None, full_output_cov=False):
+    def K(self, X, X2=None, source_length=None, source2_length=0, full_output_cov=False):
+        if not source_length:
+            source_length=int(len(X)/2)
         Sx, Tx = X[:source_length], X[source_length:]
         Kss = self.kernel(Sx, Sx)
-        if X2 == None: 
-            return Kss
-        else:
+        if (X2 is None): 
             Ktt = self.kernel(Tx, Tx)
-            Kst = self.interdomain(Sx, Tx)
-            Kts = tf.transpose(Kst)
+            Kst = self.interdomain(Sx, Tx) 
+            Kts = tf.transpose(Kst) 
             return tf.concat([tf.concat([Kss, Kst], 0), tf.concat([Kts, Ktt], 0)], 1)
+        else:
+            Sx2, Tx2 = X2[:source2_length], X2[source2_length:]
+            Kss = self.kernel(Sx, Sx2)
+            Ktt = self.kernel(Tx, Tx2)
+            Kst = self.interdomain(Sx, Tx2)
+            Kts = self.interdomain(Tx, Sx2)
+            return tf.concat([tf.concat([Kss, Kst], 1), tf.concat([Kts, Ktt], 1)], 0)
+        
                 
     def K_diag(self, X):
         return tf.concat((self.kernel.K_diag(X)), 0)
-
-
-S = np.random.normal(0, 1, 100).reshape(-1, 1)
-T = np.random.normal(0, 1, 100).reshape(-1, 1) 

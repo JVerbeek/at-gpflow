@@ -3,7 +3,12 @@ from gpflow.likelihoods import Likelihood
 from typing import Optional
 import tensorflow as tf
 from gpflow.likelihoods import ScalarLikelihood
-
+from gpflow.utilities.parameter_or_function import (
+    ConstantOrFunction,
+    ParameterOrFunction,
+    evaluate_parameter_or_function,
+    prepare_parameter_or_function,
+)
 class TransferLikelihood(ScalarLikelihood):
     """Copiloted the boilerplate for a custom likelihood class in GPflow."""
     def __init__(self, source: Likelihood, target: Likelihood, **kwargs):
@@ -41,6 +46,12 @@ class TransferLikelihood(ScalarLikelihood):
         results = tf.dynamic_stitch(partitions, results)
 
         return results
+    
+
+    def variance_at(self, X) -> tf.Tensor:
+        shape = tf.concat([tf.shape(X)[:-1], [1]], 0)
+        variance = sum([lik.variance_at(X) for lik in self.likelihoods])
+        return tf.broadcast_to(variance, shape)
 
     def _scalar_log_prob(self, X, F, Y) -> tf.Tensor:
         return self._partition_and_stitch([X, F, Y], "_scalar_log_prob")
