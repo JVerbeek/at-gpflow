@@ -23,8 +23,8 @@ class AdaptiveTransferSGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
             AAT: tf.Tensor
             L: tf.Tensor
             
-    def __init__(self, data_source, data_target, base_kernel, inducing_variable: InducingPointsLike,):
-        self.kernel = TransferKernel(4, 0.2,  base_kernel)
+    def __init__(self, data_source, data_target, base_kernel, mu, b, inducing_variable: InducingPointsLike,):
+        self.kernel = TransferKernel(mu, b,  base_kernel)
         self.data_source = gpf.models.util.data_input_to_tensor(data_source)
         self.data_target = gpf.models.util.data_input_to_tensor(data_target)
         self.data = tf.concat((data_source[0], data_target[0]), 0), tf.concat((data_source[1], data_target[1]), 0)
@@ -43,6 +43,9 @@ class AdaptiveTransferSGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
     # type-ignore is because of changed method signature:
     def maximum_log_likelihood_objective(self) -> tf.Tensor:  # type: ignore[override]
         return self.elbo()
+    
+    def get_lmb(self):
+        return self.kernel.get_lmb()
     
     def _common_calculation(self) -> "SGPR.CommonTensors":
         """

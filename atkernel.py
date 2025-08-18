@@ -6,8 +6,8 @@ import tensorflow_probability as tfp
 class TransferKernel(Kernel):
     def __init__(self, mu, b, kernel):
         super().__init__()
-        self.mu = gpf.Parameter(1, transform=tfp.bijectors.Exp())
-        self.b = gpf.Parameter(0.5, transform=tfp.bijectors.Exp())
+        self.mu = gpf.Parameter(mu, transform=tfp.bijectors.Exp())
+        self.b = gpf.Parameter(b, transform=tfp.bijectors.Exp())
         self.kernel = kernel
         
     def get_lmb(self):
