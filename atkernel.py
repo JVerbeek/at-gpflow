@@ -6,9 +6,14 @@ import tensorflow_probability as tfp
 class TransferKernel(Kernel):
     def __init__(self, mu, b, kernel):
         super().__init__()
-        self.mu = gpf.Parameter(5, transform=tfp.bijectors.Exp())
+        self.mu = gpf.Parameter(1, transform=tfp.bijectors.Exp())
         self.b = gpf.Parameter(0.5, transform=tfp.bijectors.Exp())
         self.kernel = kernel
+        
+    def get_lmb(self):
+        lmb = 2 * ((1/(1 + self.mu)) ** self.b) - 1
+        return lmb
+        
         
     def interdomain(self, X, X2):
         """Computes the between-task correlation.
@@ -28,7 +33,7 @@ class TransferKernel(Kernel):
             Ktt = self.kernel(Tx, Tx)
             Kst = self.interdomain(Sx, Tx) 
             Kts = tf.transpose(Kst) 
-            return tf.concat([tf.concat([Kss, Kst], 0), tf.concat([Kts, Ktt], 0)], 1)
+            return tf.concat([tf.concat([Kss, Kst], 1), tf.concat([Kts, Ktt], 1)], 0)
         else:
             Sx2, Tx2 = X2[:source2_length], X2[source2_length:]
             Kss = self.kernel(Sx, Sx2)

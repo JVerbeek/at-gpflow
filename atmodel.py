@@ -320,53 +320,54 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         )  # [N, P], [N, P] or [P, N, N]
         f_mean = f_mean_zero + self.mean_function(Xnew)
         return f_mean, f_var
-        
-# # Tests      
-Sx = np.linspace(0, 10, 100).reshape(-1, 1)
-Sy = (np.sin(Sx * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
-Tx = np.linspace(0.5, 10.5, 100).reshape(-1, 1)
+    
+def tests():    
+    # # Tests      
+    Sx = np.linspace(0, 10, 100).reshape(-1, 1)
+    Sy = (np.sin(Sx * 1) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+    Tx = np.linspace(0.5, 10.5, 100).reshape(-1, 1)
 
-f = 1 * np.exp(Tx*0.2)  # Change 0.2 to something else to get a more/less similar target
-Ty = (np.sin(Tx) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
-plt.plot(Sx, Sy)
-plt.plot(Tx, Ty)
-plt.show()
-at_gpr = AdaptiveTransferSGPR((Sx, Sy), (Tx, Ty), gpf.kernels.RBF(), inducing_variable=np.linspace(0, 10, 10).reshape(-1, 1))
+    f = 1 * np.exp(Tx*0.2)  # Change 0.2 to something else to get a more/less similar target
+    Ty = (np.sin(Tx) + np.random.normal(0, 0.1, size=100).reshape(-1, 1)) / 0.1
+    plt.plot(Sx, Sy)
+    plt.plot(Tx, Ty)
+    plt.show()
+    at_gpr = AdaptiveTransferSGPR((Sx, Sy), (Tx, Ty), gpf.kernels.RBF(), inducing_variable=np.linspace(0, 10, 10).reshape(-1, 1))
 
-print("Training loss value before training:", at_gpr.training_loss().numpy())
-opt = gpf.optimizers.Scipy()
-opt.minimize(at_gpr.training_loss, at_gpr.trainable_variables)
-gpf.utilities.print_summary(at_gpr)
-print("Training loss value after training:", at_gpr.training_loss().numpy())
+    print("Training loss value before training:", at_gpr.training_loss().numpy())
+    opt = gpf.optimizers.Scipy()
+    opt.minimize(at_gpr.training_loss, at_gpr.trainable_variables)
+    gpf.utilities.print_summary(at_gpr)
+    print("Training loss value after training:", at_gpr.training_loss().numpy())
 
-# print("Lambda is:", 2 * ((1/(1 + at_gpr.kernel.mu)) ** at_gpr.kernel.b) - 1)
+    # print("Lambda is:", 2 * ((1/(1 + at_gpr.kernel.mu)) ** at_gpr.kernel.b) - 1)
 
 
-Xplot = np.linspace(0, 10, 100).reshape(-1, 1).astype(float)
-# plt.imshow(at_gpr.kernel(Xplot))
-# plt.show()
-f_mean, f_var = at_gpr.predict_f(Xplot)
-y_mean, y_var = at_gpr.predict_y(Xplot)
-print(f_mean)
+    Xplot = np.linspace(0, 10, 100).reshape(-1, 1).astype(float)
+    # plt.imshow(at_gpr.kernel(Xplot))
+    # plt.show()
+    f_mean, f_var = at_gpr.predict_f(Xplot)
+    y_mean, y_var = at_gpr.predict_y(Xplot)
+    print(f_mean)
 
-f_lower = f_mean - 1.96 * np.sqrt(f_var)
-f_upper = f_mean + 1.96 * np.sqrt(f_var)
-y_lower = y_mean - 1.96 * np.sqrt(y_var)
-y_upper = y_mean + 1.96 * np.sqrt(y_var)
+    f_lower = f_mean - 1.96 * np.sqrt(f_var)
+    f_upper = f_mean + 1.96 * np.sqrt(f_var)
+    y_lower = y_mean - 1.96 * np.sqrt(y_var)
+    y_upper = y_mean + 1.96 * np.sqrt(y_var)
 
-plt.scatter(at_gpr.inducing_variable.Z, np.zeros_like(at_gpr.inducing_variable.Z), marker="^", color="green", label="inducing variable")
-plt.plot(Sx, Sy, "rx", mew=2, label="source data")
-plt.plot(Tx, Ty, "kx", mew=2, label="target data")
-plt.plot(Xplot, f_mean, "-", color="C0", label="mean")
-plt.plot(Xplot, f_lower, "--", color="C0", label="f 95% confidence")
-plt.plot(Xplot, f_upper, "--", color="C0")
-plt.fill_between(
-    Xplot[:, 0], f_lower[:, 0], f_upper[:, 0], color="C0", alpha=0.1
-)
-plt.plot(Xplot, y_lower, ".", color="C0", label="Y 95% confidence")
-plt.plot(Xplot, y_upper, ".", color="C0")
-plt.fill_between(
-    Xplot[:, 0], y_lower[:, 0], y_upper[:, 0], color="C0", alpha=0.1
-)
-plt.legend()
-plt.show()
+    plt.scatter(at_gpr.inducing_variable.Z, np.zeros_like(at_gpr.inducing_variable.Z), marker="^", color="green", label="inducing variable")
+    plt.plot(Sx, Sy, "rx", mew=2, label="source data")
+    plt.plot(Tx, Ty, "kx", mew=2, label="target data")
+    plt.plot(Xplot, f_mean, "-", color="C0", label="mean")
+    plt.plot(Xplot, f_lower, "--", color="C0", label="f 95% confidence")
+    plt.plot(Xplot, f_upper, "--", color="C0")
+    plt.fill_between(
+        Xplot[:, 0], f_lower[:, 0], f_upper[:, 0], color="C0", alpha=0.1
+    )
+    plt.plot(Xplot, y_lower, ".", color="C0", label="Y 95% confidence")
+    plt.plot(Xplot, y_upper, ".", color="C0")
+    plt.fill_between(
+        Xplot[:, 0], y_lower[:, 0], y_upper[:, 0], color="C0", alpha=0.1
+    )
+    plt.legend()
+    plt.show()
