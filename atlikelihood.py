@@ -48,9 +48,12 @@ class TransferLikelihood(ScalarLikelihood):
         return results
     
 
-    def variance_at(self, X) -> tf.Tensor:
+    def variance_at(self, X, kind="source") -> tf.Tensor:
         shape = tf.concat([tf.shape(X)[:-1], [1]], 0)
-        variance = sum([lik.variance_at(X) for lik in self.likelihoods])
+        if kind == "source":
+            variance = self.source.variance_at(X)
+        else:
+            variance = self.target.variance_at(X)
         return tf.broadcast_to(variance, shape)
 
     def _scalar_log_prob(self, X, F, Y) -> tf.Tensor:
