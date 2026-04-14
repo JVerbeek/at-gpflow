@@ -15,7 +15,7 @@ from gpflow.utilities import to_default_float
 from gpflow.models.util import InducingPointsLike, data_input_to_tensor, inducingpoint_wrapper
 from gpflow.inducing_variables import InducingPoints
 from typing import NamedTuple
-from at_covariances import Kuu_conditional, Kuf_conditional, TransferInducingPoints
+
 
 
 class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
@@ -287,6 +287,170 @@ def tests():
     )
     plt.legend()
     plt.show()
+
+
+
+class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
+    def __init__(self, data, kernel, likelihood, mean_function=None, num_latent_gps=2, inducing_variable=[]):
+        super().__init__(kernel, likelihood, mean_function, num_latent_gps)
+        self.data = data   
+        self.kernel = kernel
+        self.likelihood = likelihood
+        self.inducing_variable = InducingPoints(inducing_variable)
+        self.mean_function = gpf.mean_functions.Zero()
+        self.conditioning_indices = [0]
+
+        
+    def conditional_likelihood(self, *args, **kwargs) -> tf.Tensor:
+
+        # Rebuild: look at all unique indices. 
+        # Then, figure out what set to condition on
+        # Then, gather all conditioning variables as source, rest as target.
+        def get_condition_number(M, name=""):
+            s = tf.linalg.svd(M, compute_uv=False)
+            tf.print(f"condition number {name}", s[0]/s[-1], s[0], s[-1])
+            return 
+
+        Xs, Ys = self.data
+        Kall = self.kernel(Xs)
+        Xind = self.inducing_variable.Z
+        #tf.print(Kall.shape)
+
+        # Determine what is source and what is target (currently use only one target var)
+        As = (Ys[:,1]  == 0)
+        Bs = (Ys[:,1]  == 1)
+        Ax, Ay = tf.reshape(Xs[:,0][As], (-1, 1)), tf.reshape(Ys[:,0][As], (-1, 1))
+        Bx, By = tf.reshape(Xs[:,0][Bs], (-1, 1)), tf.reshape(Ys[:,0][Bs], (-1, 1))
+
+        indices_A = tf.reshape(tf.where(As), [-1])
+        indices_B = tf.reshape(tf.where(Bs), [-1])
+
+        # Exact matrices
+        Kbb = tf.gather(tf.gather(Kall, indices_B, axis=0), indices_B, axis=1) 
+        Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) + tf.linalg.diag(tf.squeeze(self.likelihood.source.variance_at(Ax)))
+        Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
+        Kba = tf.transpose(Kab)
+
+        # Approximate matrices
+        Kma = self.kernel(self.inducing_variable.Z, Xs[As])
+        Kmb = self.kernel(self.inducing_variable.Z, Xs[Bs])
+        Kam = tf.transpose(Kma)
+        Kmm = self.kernel(self.inducing_variable.Z) + np.eye(len(Xind), dtype=np.float64) * 1e-6
+        L_Kmm = tf.linalg.cholesky(Kmm)
+        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)
+        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
+
+        # Full approximations of the exact matrices
+        Qaa = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kma) 
+        Qab = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kmb)
+        Qba = tf.transpose(Qab)
+        
+        LQaa = tf.linalg.cholesky(Qaa + tf.eye(len(Qaa), dtype=tf.float64) * 1e-6) 
+        LQaa_Kab = tf.linalg.triangular_solve(LQaa, Qab)
+        
+        # Woodbury
+        Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
+        # Linv = tf.linalg.inv(Lambda)
+        # Kminv = tf.linalg.inv(Kmm)
+        # Qaa_inv = Linv - Linv @ Kam @ tf.linalg.inv(Kmm + Kma @ Linv @ Kam) @ Kma @ Linv
+        # Qbb_approx = Qba @ Qaa_inv @ Qab
+
+        Qbb_approx = tf.matmul(LQaa_Kab, LQaa_Kab, transpose_a=True)
+        Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb) 
+
+        # FITC-type diagonal
+
+        # Compute conditional mu
+        Qaa_L = tf.linalg.cholesky(Qaa + Lambda) 
+        gamma = tf.linalg.triangular_solve(tf.transpose(Qaa_L), tf.linalg.triangular_solve(Qaa_L, Ay, lower=False))
+        mu_t = tf.matmul(Qba, gamma)
+        
+        # Compute conditional variance
+        Lambda_target =  tf.linalg.diag(tf.linalg.diag_part(Kbb - Qbb_approx))
+        C_t = Qbb - Qbb_approx + Lambda_target + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
+
+        delta = By - mu_t
+        L_t = tf.linalg.cholesky(C_t  + tf.eye(tf.shape(C_t)[0], dtype=tf.float64) * 1e-6)
+        alpha_t = tf.linalg.triangular_solve(L_t, delta, lower=True)
+        n_source = tf.cast(tf.shape(Bx)[0], Bx.dtype)
+        logdet_t = 2 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
+        lml = -0.5 * (logdet_t + tf.reduce_sum(alpha_t ** 2) + n_source * tf.cast(tf.math.log(2*np.pi), Ax.dtype))
+        return tf.squeeze(lml)
+
+    def maximum_log_likelihood_objective(self):
+        return self.conditional_likelihood()
+
+
+    def predict_f(
+        self, Xnew, full_cov: bool = False, full_output_cov: bool = False):
+        r"""
+        Allegedly, the GP prediction stays the same, so instead of creating an inference shaped footgun, use GPFlow methods.
+        This method computes predictions at X \in R^{N \x D} input points
+
+        .. math::
+            p(F* | Y)
+
+        where F* are points on the GP at new data points, Y are noisy observations at training data
+        points.
+        """
+
+        Xs, Ys = self.data
+        Xind = self.inducing_variable.Z
+        Kall = self.kernel(Xs)
+        err = (Ys - self.mean_function(Xs))[:,0][:,None]
+      
+        As = (Ys[:,1] == 0)
+        Bs = (Ys[:,1] == 1)
+
+        knn = self.kernel(Xnew, full_cov=full_cov) + tf.squeeze(self.likelihood.target.variance_at(Xnew))
+
+        Ax, Ay = tf.reshape(Xs[:,0][As], (-1, 1)), tf.reshape(Ys[:,0][As], (-1, 1))
+        Bx, By = tf.reshape(Xs[:,0][Bs], (-1, 1)), tf.reshape(Ys[:,0][Bs], (-1, 1))
+
+        indices_A = tf.reshape(tf.where(As), [-1])
+        indices_B = tf.reshape(tf.where(Bs), [-1])
+       
+        # Compute exact kernel parts
+        Kbb = tf.gather(tf.gather(Kall, indices_B, axis=0), indices_B, axis=1) 
+        Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) 
+        Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
+        Kba = tf.transpose(Kab)
+
+        # Compute inducing points x rest data 
+        Kma = self.kernel(self.inducing_variable.Z, Xs[As])
+        Kmb = self.kernel(self.inducing_variable.Z, Xs[Bs])
+        Kam = tf.transpose(Kma)
+        Kmm = self.kernel(self.inducing_variable.Z) + np.eye(len(Xind.numpy()), dtype=np.float64) * 1e-6
+        L_Kmm = tf.linalg.cholesky(Kmm)
+        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)
+        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
+
+        # Use above to compute approximations and diagonal
+        Qaa = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kma)
+        Qab = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kmb)
+        Qba = tf.transpose(Qab)
+        Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb)
+        Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
+        Lambda_t = tf.linalg.diag(tf.linalg.diag_part(Kbb - Qbb))
+
+        #tf.print(self.inducing_variable.Z)
+        K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qab), 1), tf.concat((Qba, Qbb + Lambda_t), 1)), 0)
+        L_Kfitc = tf.linalg.cholesky(K_fitc + tf.eye(len(Xs), dtype=tf.float64) * 1e-5)
+
+        #tf.print(kmm_plus_s.shape)
+        # Construct Kmn
+        Knm = self.kernel(Xs, self.inducing_variable.Z) @ tf.linalg.inv(Kmm) @ self.kernel(self.inducing_variable.Z, Xnew)
+        LfitcKnm = tf.linalg.triangular_solve(L_Kfitc, Knm)
+        Lfitcy = tf.linalg.triangular_solve(L_Kfitc, err, lower=True)
+      
+        cond = tf.transpose(LfitcKnm) @ LfitcKnm  
+        f_mean_zero = tf.transpose(LfitcKnm) @ Lfitcy
+        f_var = tf.expand_dims(tf.linalg.diag_part(knn - cond), 1)
+        fvar = knn - tf.reduce_sum(tf.square(LfitcKnm), -2)  # [..., N]
+        fvar = tf.expand_dims(fvar, -2)
+        #tf.print("fm0", f_mean_zero.shape)
+        f_mean = f_mean_zero + self.mean_function(Xnew[:,0][:,None])
+        return f_mean, f_var
 
 
 if __name__ == "__main__":
