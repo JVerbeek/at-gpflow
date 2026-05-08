@@ -10,7 +10,11 @@ f64 = lambda x: np.array(x, dtype=np.float64)
 class TransferCoregion(Kernel):
     def __init__(self, kernel):
         super().__init__()
+<<<<<<< HEAD
         W: AnyNDArray = 0.1 * np.random.randint(-10, 10, (1, 2)) 
+=======
+        W: AnyNDArray = 0.1 * np.random.randint(1, 10, (2, 2)) 
+>>>>>>> a157a4f2fbd074ec698829b9a8b75f1fb0231ccc
         kappa = np.ones(2)
         self.W = gpf.Parameter(W)
         self.kernel = kernel
@@ -109,4 +113,7 @@ class TransferKernel(Kernel):
                 
     def K_diag(self, x):
         return tf.concat((self.kernel.K_diag(x)), 0)
+<<<<<<< HEAD
 
+=======
+>>>>>>> a157a4f2fbd074ec698829b9a8b75f1fb0231ccc
