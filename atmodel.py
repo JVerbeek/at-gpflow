@@ -98,7 +98,7 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         As = (Ys[:,1] == 0)
         Bs = (Ys[:,1] == 1)
 
-        knn = self.kernel(Xnew, full_cov=full_cov) + tf.squeeze(self.likelihood.target.variance_at(Xnew))
+        knn = self.kernel(Xnew, full_cov=full_cov)
 
         Ax, Ay = tf.reshape(Xs[:,0][As], (-1, 1)), tf.reshape(Ys[:,0][As], (-1, 1))
         Bx, By = tf.reshape(Xs[:,0][Bs], (-1, 1)), tf.reshape(Ys[:,0][Bs], (-1, 1))
@@ -111,7 +111,7 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) 
         Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
         Kba = tf.transpose(Kab)
-        Kmm = tf.concat((tf.concat((Kaa, tf.linalg.matrix_transpose(Kab)), 0), tf.concat((Kab, Kbb), 0)), 1)
+        Kmm = tf.concat((tf.concat((Kaa, Kba), 0), tf.concat((Kab, Kbb), 0)), 1)
         noise = tf.squeeze(tf.linalg.diag(tf.concat((self.likelihood.source.variance_at(Ax), self.likelihood.target.variance_at(Bx)), 0)))
         kmm_plus_s = Kmm + tf.linalg.diag(noise)
 
@@ -119,9 +119,9 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         # Construct Kmn
         Knm = self.kernel(Xs, Xnew)
         Lkmm = tf.linalg.cholesky(kmm_plus_s)
-        KnminvLmm = tf.linalg.triangular_solve(Lkmm, Knm)
+        KnminvLmm = tf.linalg.triangular_solve(Lkmm, Knm) #Lkmm-1 Knm
         tf.print(KnminvLmm.shape)
-        Lkmmy = tf.linalg.cholesky_solve(Lkmm, err)
+        Lkmmy = tf.linalg.triangular_solve(Lkmm, err) # Lkmm-1 err
       
         cond = tf.transpose(KnminvLmm) @ KnminvLmm
         f_mean_zero = tf.transpose(KnminvLmm) @ Lkmmy
@@ -129,7 +129,7 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         fvar = knn - tf.reduce_sum(tf.square(Lkmmy), -2)  # [..., N]
         fvar = tf.expand_dims(fvar, -2)
         #tf.print("fm0", f_mean_zero.shape)
-        f_mean = f_mean_zero + self.mean_function(Xnew[:,0][:,None])
+        f_mean = f_mean_zero + self.mean_function(Xnew)
         return f_mean, fvar
 
 class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
@@ -305,6 +305,7 @@ from gpflow.utilities import to_default_float
 from gpflow.models.util import InducingPointsLike, data_input_to_tensor, inducingpoint_wrapper
 from gpflow.inducing_variables import InducingPoints
 from typing import NamedTuple
+import time 
 
 class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
     def __init__(self, data, kernel, likelihood, mean_function=None, num_latent_gps=2, inducing_variable=[], exact_target=False, jitter=1e-6):
@@ -318,11 +319,10 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         self.conditioning_indices = [0]
         self.opt_logs = []
         self.exact_target = exact_target
-        self.jitter = jitter
+        self.jitter = tf.cast(jitter, tf.float64)
 
         
     def conditional_likelihood(self, *args, **kwargs) -> tf.Tensor:
-
         # Rebuild: look at all unique indices. 
         # Then, figure out what set to condition on
         # Then, gather all conditioning variables as source, rest as target.
@@ -332,7 +332,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             return 
 
         Xs, Ys = self.data
-        Kall = self.kernel(Xs)
+        # Kall = self.kernel(Xs)
         Xind = self.inducing_variable.Z
         #tf.print(Kall.shape)
 
@@ -347,17 +347,18 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         indices_B = tf.reshape(tf.where(Bs), [-1])
 
         # Exact matrices
-        Kbb = tf.gather(tf.gather(Kall, indices_B, axis=0), indices_B, axis=1)# + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
-        Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) 
-        Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
-        Kba = tf.transpose(Kab)
+        Kbb = self.kernel(Xs[Bs])# + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
+        Kaa = self.kernel(Xs[As])
+        # Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
+        # Kba = tf.transpose(Kab)
 
         # Approximate matrices
         inducing_variable = tf.concat((self.inducing_variable.Z, self.inducing_indices), -1)
-        Kmm = self.kernel(inducing_variable) + np.eye(len(inducing_variable), dtype=np.float64) * self.jitter
+        Kmm = self.kernel(inducing_variable) + tf.eye(len(inducing_variable), dtype=tf.float64) * self.jitter
         Kma = self.kernel(inducing_variable, Xs[As])
         Kmb = self.kernel(inducing_variable, Xs[Bs])
         Kam = tf.transpose(Kma)
+    
         L_Kmm = tf.linalg.cholesky(Kmm)
         Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)
         Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
@@ -367,12 +368,14 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Qab = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kmb)
         Qba = tf.transpose(Qab)
         
-        LQaa = tf.linalg.cholesky(Qaa + tf.eye(len(Qaa), dtype=tf.float64) * self.jitter) 
-        LQaa_Kab = tf.linalg.triangular_solve(LQaa, Qab)
+        #LQaa = tf.linalg.cholesky(Qaa + tf.eye(len(Qaa), dtype=tf.float64) * self.jitter) 
+        #LQaa_Kab = tf.linalg.triangular_solve(LQaa, Qab)
         
         # Woodbury
         Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
-        Linv = tf.linalg.inv(Lambda)
+        tf.print(Lambda.shape)
+        Linv = tf.linalg.diag(1./tf.linalg.diag_part(Lambda))
+        tf.print(Linv.shape)
         right_part = tf.linalg.triangular_solve(tf.linalg.cholesky(Kmm + Kma @ Linv @ Kam), Kma @ Linv)
         Qaa_inv = Linv - tf.matmul(right_part, right_part, transpose_a=True)
         Qbb_given_aa = Qba @ Qaa_inv @ Qab
@@ -389,19 +392,18 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         
         # Compute conditional variance
         if self.exact_target:
-            Lambda_target =  tf.linalg.diag(tf.linalg.diag_part(Kbb  - Qbb))
             C_t = Kbb - Qbb_given_aa + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
         else:
             Lambda_target =  tf.linalg.diag(tf.linalg.diag_part(Kbb - Qbb))
             C_t = Qbb - Qbb_given_aa + Lambda_target + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
 
         delta = By - mu_t
-        L_t = tf.linalg.cholesky(C_t  + tf.eye(tf.shape(C_t)[0], dtype=tf.float64) * 1e-6)
+        L_t = tf.linalg.cholesky(C_t  + tf.eye(tf.shape(C_t)[0], dtype=tf.float64) * self.jitter)
         alpha_t = tf.linalg.triangular_solve(L_t, delta)
         n_source = tf.cast(tf.shape(Bx)[0], Bx.dtype)
-        logdet_t = tf.linalg.logdet(C_t)
+        logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
         quad = tf.reduce_sum(alpha_t ** 2)
-        lml = -0.5 * (logdet_t + quad + n_source * tf.cast(tf.math.log(2*np.pi), Ax.dtype))
+        lml = -0.5 * (logdet_t + quad + n_source * tf.cast(tf.math.log(2*tf.constant(np.pi)), Ax.dtype))
         return tf.squeeze(lml)
 
     def maximum_log_likelihood_objective(self):
@@ -423,7 +425,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
         Xs, Ys = self.data
         Xind = self.inducing_variable.Z
-        Kall = self.kernel(Xs)
+        # Kall = self.kernel(Xs)
         err = (Ys - self.mean_function(Xs))[:,0][:,None]
       
         As = (Ys[:,1] == 0)
@@ -438,17 +440,18 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         indices_B = tf.reshape(tf.where(Bs), [-1])
        
         # Compute exact kernel parts
-        Kbb = tf.gather(tf.gather(Kall, indices_B, axis=0), indices_B, axis=1) 
-        Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) 
-        Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
-        Kba = tf.transpose(Kab)
+        Kbb = self.kernel(Xs[Bs])
+        Kaa = self.kernel(Xs[As])
+        # Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) 
+        # Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
+        # Kba = tf.transpose(Kab)
 
         # Compute inducing points x rest data 
         inducing_variable = tf.concat((self.inducing_variable.Z, self.inducing_indices), -1)
         Kma = self.kernel(inducing_variable, Xs[As])
         Kmb = self.kernel(inducing_variable, Xs[Bs])
         Kam = tf.transpose(Kma)
-        Kmm = self.kernel(inducing_variable) + np.eye(len(Xind.numpy()), dtype=np.float64) * 1e-6
+        Kmm = self.kernel(inducing_variable) + np.eye(len(Xind.numpy()), dtype=np.float64) * self.jitter
         L_Kmm = tf.linalg.cholesky(Kmm)
         Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)
         Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
@@ -465,8 +468,8 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         if self.exact_target:
             K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qab), 1), tf.concat((Qba, Kbb), 1)), 0)
         else:
-            K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qab), 1), tf.concat((Qba, Qbb), 1)), 0)
-        L_Kfitc = tf.linalg.cholesky(K_fitc + tf.eye(len(Xs), dtype=tf.float64) * 1e-5)
+            K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qab), 1), tf.concat((Qba, Qbb + Lambda_t), 1)), 0)
+        L_Kfitc = tf.linalg.cholesky(K_fitc + tf.eye(len(Xs), dtype=tf.float64) * self.jitter)
 
         #tf.print(kmm_plus_s.shape)
         # Construct Kmn
