@@ -29,13 +29,10 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
     def conditional_likelihood(self, *args, **kwargs) -> tf.Tensor:
         def get_condition_number(M, name=""):
+            """Debug tool for if matrices turn non-singular"""
             s = tf.linalg.svd(M, compute_uv=False)
             tf.print(f"condition number {name}", s[0]/s[-1], s[0], s[-1])
             return 
-
-        # Rebuild: look at all unique indices. 
-        # Then, figure out what set to condition on
-        # Then, gather all conditioning variables as source, rest as target.
 
         Xs, Ys = self.data
         Kall = self.kernel(Xs)
@@ -49,29 +46,43 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
         indices_A = tf.reshape(tf.where(As), [-1])
         indices_B = tf.reshape(tf.where(Bs), [-1])
+
+        # Compute all sub-matrices by collecting the kernel values for source and target. 
         Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) + tf.linalg.diag(tf.squeeze(self.likelihood.source.variance_at(Ax)))
         Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
         Kbb = tf.gather(tf.gather(Kall, indices_B, axis=0), indices_B, axis=1) + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx)))
         Kba = tf.transpose(Kab)
 
-        # Assume kernel * coregion
-        Lss = tf.linalg.cholesky(Kaa)
- 
-        A = tf.linalg.cholesky_solve(Lss, Ay)
-        V = tf.linalg.cholesky_solve(Lss, Kab)
+        # Cholesky pain starts here
+        Laa = tf.linalg.cholesky(Kaa) 
+        A = tf.linalg.triangular_solve(Laa, Ay) # Laa * x = Ay, so then x = inv(Laa) * Ay
+        V = tf.linalg.triangular_solve(Laa, Kab) # Laa * x = Kab, so then x = inv(Laa) * Kab
         
-        mu_t = tf.matmul(V, A, transpose_a=True)
-        C_t = Kbb - tf.matmul(Kba, V)
+        mu_t = tf.matmul(V, A, transpose_a=True)  
+        # Math:
+        # transpose(inv(Laa) * Kab) = Kba * inv(Laa).T
+        # mu_t = Kba * inv(Laa).T * inv(Laa) * Ay 
+        #        <=> Kba * inv(LaaLaa.T) * Ay
+
+        C_t = Kbb - tf.matmul(V, V, transpose_a=True)
+        # Math:
+        # We want to compute Kbb - Kba inv(Kaa) Kab, so since
+        # Kba inv(Kaa) Kab <=> Kba * inv(Laa).T * inv(Laa) * Kab <=> Kba * (Laa * Laa.T) * Kab
+
         L_t = tf.linalg.cholesky(C_t)
 
-        logdet_t = tf.linalg.logdet(C_t)
+        # product of cholesky diagonals is determinant, therefore sum of log cholesky is also determinant
+        logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
         
         delta = By - mu_t
-        alpha_t = tf.linalg.triangular_solve(L_t, delta)
+        alpha_t = tf.linalg.triangular_solve(L_t, delta) 
+        # Math
+        # L_t * x = delta, then alpha_t = inv(L_t)*(By - mu_t)
         
-        n_source = tf.cast(tf.shape(Bx)[0], Bx.dtype)
+        n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)  # We compute for the target (given source)
+        quad_part = tf.matmul(alpha_t, alpha_t, transpose_a=True)
         
-        lml = -0.5 * (logdet_t + tf.reduce_sum(tf.square(alpha_t)) + n_source * tf.cast(tf.math.log(2*np.pi), Ax.dtype))
+        lml = -0.5 * (logdet_t + quad_part + n_target * tf.cast(tf.math.log(2*np.pi), Ax.dtype))
         return tf.squeeze(lml)
 
     def maximum_log_likelihood_objective(self):
@@ -216,7 +227,7 @@ class AdaptiveTransferGPR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         err = y - self.mean_function(X)
         
         # Construct Knn
-        knn = self.kernel.kernel(Xnew, full_cov=full_cov) + tf.squeeze(self.likelihood.target.variance_at(Xnew))
+        knn = self.kernel.kernel(Xnew, full_cov=full_cov) #+ tf.squeeze(self.likelihood.target.variance_at(Xnew))
         
         # Construct the kernel matrix Kmm
         Css = self.kernel.kernel(Sx, Sx) * self.kernel.get_B()[0, 0]
@@ -359,41 +370,45 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Kmb = self.kernel(inducing_variable, Xs[Bs])
         Kam = tf.transpose(Kma)
     
-        L_Kmm = tf.linalg.cholesky(Kmm)
-        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)
-        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
+        # Steps to avoid explicit inverse of Kmm
+        L_Kmm = tf.linalg.cholesky(Kmm) 
+        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma) # L_Kmm x = Kma, x = L_Kmm^-1 Kma
+        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb) # L_Kmm x = Kmb, x = L_Kmm^-1 Kmb
 
         # Full approximations of the exact matrices
         Qaa = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kma) 
         Qab = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kmb)
         Qba = tf.transpose(Qab)
-        
+
+        # Alternative way of computing inv(Qaa) implicitly, should be a bit slower.
         #LQaa = tf.linalg.cholesky(Qaa + tf.eye(len(Qaa), dtype=tf.float64) * self.jitter) 
         #LQaa_Kab = tf.linalg.triangular_solve(LQaa, Qab)
-        
-        # Woodbury
-        Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
-        tf.print(Lambda.shape)
-        Linv = tf.linalg.diag(1./tf.linalg.diag_part(Lambda))
-        tf.print(Linv.shape)
-        right_part = tf.linalg.triangular_solve(tf.linalg.cholesky(Kmm + Kma @ Linv @ Kam), Kma @ Linv)
-        Qaa_inv = Linv - tf.matmul(right_part, right_part, transpose_a=True)
-        Qbb_given_aa = Qba @ Qaa_inv @ Qab
-
         #Qbb_given_aa = tf.matmul(LQaa_Kab, LQaa_Kab, transpose_a=True)
+
+        Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
+
+        # Want to compute: inv((Lambda + Kam inv(Kmm) Kma))
+        # Woodbury: (A+UCV)^-1 = inv(A) - inv(A) U inv((inv(C) + V inv(A) U)) V inv(A)
+        # A = Lambda 
+        # U = V.T = Kam 
+        # C = inv(Kmm), inv(C) = Kmm
+        Linv = tf.linalg.diag(1./tf.linalg.diag_part(Lambda))  # Lambda is diagonal, so this is the fast inverse.
+        woodbury_middle = tf.linalg.cholesky(Kmm + Kma @ Linv @ Kam) # This needs to be inverted, dimension is m by m. 
+        right_part = tf.linalg.triangular_solve(woodbury_middle, Kma @ Linv) # LWM * x = Kma @ Linv, so x = inv(LWM) @ Kma @ Linv
+        Qaa_inv = Linv - tf.matmul(right_part, right_part, transpose_a=True) # Full Woodbury. 
+        Qbb_given_aa = Qba @ Qaa_inv @ Qab
         Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb)
 
-        # FITC-type diagonal
-
-        # Compute conditional mu
+        # Compute conditional mu similar to exact version
         Qaa_L = tf.linalg.cholesky(Qaa + Lambda + tf.linalg.diag(tf.squeeze(self.likelihood.source.variance_at(Ax)))) 
-        gamma = tf.linalg.cholesky_solve(Qaa_L, Ay)
-        mu_t = tf.matmul(Qba, gamma)
+        V = tf.linalg.triangular_solve(Qaa_L, Qab) # Qaa_L x = Qba, x = inv(Qaa_L) Qab
+        A = tf.linalg.triangular_solve(Qaa_L, Ay) # Qaa_L x = Ay, x = inv(Qaa_L) Ay 
+        mu_t = tf.matmul(V, A, transpose_a=True)
         
-        # Compute conditional variance
-        if self.exact_target:
+        # Compute conditional variance *bb - Qba inv(Qaa) Qab
+        if self.exact_target: # Exact target matrix Kbb, approximate Kba inv(Kaa) Kab <~> Qba inv(Qaa) Qab
             C_t = Kbb - Qbb_given_aa + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
-        else:
+        else: # Approximate everything.
             Lambda_target =  tf.linalg.diag(tf.linalg.diag_part(Kbb - Qbb))
             C_t = Qbb - Qbb_given_aa + Lambda_target + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx))) 
 
@@ -402,7 +417,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         alpha_t = tf.linalg.triangular_solve(L_t, delta)
         n_source = tf.cast(tf.shape(Bx)[0], Bx.dtype)
         logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
-        quad = tf.reduce_sum(alpha_t ** 2)
+        quad = tf.matmul(alpha_t, alpha_t, transpose_a=True)
         lml = -0.5 * (logdet_t + quad + n_source * tf.cast(tf.math.log(2*tf.constant(np.pi)), Ax.dtype))
         return tf.squeeze(lml)
 
@@ -425,13 +440,13 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
         Xs, Ys = self.data
         Xind = self.inducing_variable.Z
-        # Kall = self.kernel(Xs)
+
         err = (Ys - self.mean_function(Xs))[:,0][:,None]
       
         As = (Ys[:,1] == 0)
         Bs = (Ys[:,1] == 1)
 
-        knn = self.kernel(Xnew, full_cov=full_cov) + tf.squeeze(self.likelihood.target.variance_at(Xnew))
+        knn = self.kernel(Xnew, full_cov=full_cov) #+ tf.squeeze(self.likelihood.target.variance_at(Xnew))
 
         Ax, Ay = tf.reshape(Xs[:,0][As], (-1, 1)), tf.reshape(Ys[:,0][As], (-1, 1))
         Bx, By = tf.reshape(Xs[:,0][Bs], (-1, 1)), tf.reshape(Ys[:,0][Bs], (-1, 1))
