@@ -201,9 +201,9 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Qba = tf.transpose(Qab)
 
         # Alternative way of computing inv(Qaa) implicitly, should be a bit slower.
-        LQaa = tf.linalg.cholesky(Qaa + tf.eye(len(Qaa), dtype=tf.float64) * self.jitter) 
-        LQaa_Kab = tf.linalg.triangular_solve(LQaa, Qab)
-        Qbb_given_aa = tf.matmul(LQaa_Kab, LQaa_Kab, transpose_a=True)
+        #LQaa = tf.linalg.cholesky(Qaa + tf.eye(len(Qaa), dtype=tf.float64) * self.jitter) 
+        #LQaa_Kab = tf.linalg.triangular_solve(LQaa, Qab)
+        #Qbb_given_aa = tf.matmul(LQaa_Kab, LQaa_Kab, transpose_a=True)
 
         Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
 
@@ -215,11 +215,12 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         #Linv = tf.linalg.diag(1./tf.linalg.diag_part(Lambda))  # Lambda is diagonal, so this is the fast inverse.
         D_a = tf.linalg.diag_part(Lambda) + tf.squeeze(self.likelihood.source.variance_at(Ax))
         Linv = tf.linalg.diag(1./D_a)
-        # woodbury_middle = tf.linalg.cholesky(Kmm + Kma @ Linv @ Kam) # This needs to be inverted, dimension is m by m. 
-        # right_part = tf.linalg.triangular_solve(woodbury_middle, Kma @ Linv) # LWM * x = Kma @ Linv, so x = inv(LWM) @ Kma @ Linv
-        # Qaa_inv = Linv - tf.matmul(right_part, right_part, transpose_a=True) # Full Woodbury. 
-        # Qbb_given_aa = Qba @ Qaa_inv @ Qab
+        woodbury_middle = tf.linalg.cholesky(Kmm + Kma @ Linv @ Kam) # This needs to be inverted, dimension is m by m. 
+        right_part = tf.linalg.triangular_solve(woodbury_middle, Kma @ Linv) # LWM * x = Kma @ Linv, so x = inv(LWM) @ Kma @ Linv
+        Qaa_inv = Linv - tf.matmul(right_part, right_part, transpose_a=True) # Full Woodbury. 
+        Qbb_given_aa = Qba @ Qaa_inv @ Qab
         Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb)
+
 
         # Compute conditional mu similar to exact version
         Qaa_L = tf.linalg.cholesky(Qaa + Lambda + tf.linalg.diag(tf.squeeze(self.likelihood.source.variance_at(Ax))))
