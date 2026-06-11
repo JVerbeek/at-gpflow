@@ -185,7 +185,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
         # Approximate matrices
         inducing_variable = tf.concat((self.inducing_variable.Z, self.inducing_indices), -1)
-        Kmm = self.kernel(inducing_variable) #+ tf.eye(len(inducing_variable), dtype=tf.float64) * self.jitter
+        Kmm = self.kernel(inducing_variable) + tf.eye(len(inducing_variable), dtype=tf.float64) * self.jitter
         Kma = self.kernel(inducing_variable, Xs[As])
         Kmb = self.kernel(inducing_variable, Xs[Bs])
         Kam = tf.transpose(Kma)
@@ -223,7 +223,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             C_t = Kbb - Qbb + BmWmt + tf.linalg.diag(D_t)
 
         delta = By - mu_t
-        L_t = tf.linalg.cholesky(C_t)
+        L_t = tf.linalg.cholesky(C_t) 
         alpha_t = tf.linalg.triangular_solve(L_t, delta)
         n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
         logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
@@ -242,7 +242,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
     def predict_f(
         self, Xnew, full_cov: bool = False, full_output_cov: bool = False):
         r"""
-        Allegedly, the GP prediction stays the same, so instead of creating an inference shaped footgun, use GPFlow methods.
+        Allegedly, the GP prediction stays the same.
         This method computes predictions at X \in R^{N \x D} input points
 
         .. math::
@@ -345,13 +345,14 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         """
 
         Xs, Ys = self.data
-        Kall = self.kernel(Xs)
+        Xind = self.inducing_variable.Z
+
         err = (Ys - self.mean_function(Xs))[:,0][:,None]
       
         As = (Ys[:,1] == 0)
         Bs = (Ys[:,1] == 1)
 
-        knn = self.kernel(Xnew, full_cov=full_cov)
+        knn = self.kernel(Xnew, full_cov=full_cov) #+ tf.squeeze(self.likelihood.target.variance_at(Xnew))
 
         Ax, Ay = tf.reshape(Xs[:,0][As], (-1, 1)), tf.reshape(Ys[:,0][As], (-1, 1))
         Bx, By = tf.reshape(Xs[:,0][Bs], (-1, 1)), tf.reshape(Ys[:,0][Bs], (-1, 1))
@@ -360,28 +361,49 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         indices_B = tf.reshape(tf.where(Bs), [-1])
        
         # Compute exact kernel parts
-        Kbb = tf.gather(tf.gather(Kall, indices_B, axis=0), indices_B, axis=1) 
-        Kaa = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_A, axis=1) 
-        Kab = tf.gather(tf.gather(Kall, indices_A, axis=0), indices_B, axis=1)
-        Kba = tf.transpose(Kab)
-        Kmm = tf.concat((tf.concat((Kaa, Kba), 0), tf.concat((Kab, Kbb), 0)), 1)
-        noise = tf.squeeze(tf.linalg.diag(tf.concat((self.likelihood.source.variance_at(Ax), self.likelihood.target.variance_at(Bx)), 0)))
-        kmm_plus_s = Kmm + tf.linalg.diag(noise)
+        Kbb = self.kernel(Xs[Bs])
+        Kaa = self.kernel(Xs[As])
+
+        # Compute inducing points x rest data 
+        inducing_variable = tf.concat((self.inducing_variable.Z, self.inducing_indices), -1)
+        Kma = self.kernel(inducing_variable, Xs[As])
+        Kmb = self.kernel(inducing_variable, Xs[Bs])
+        Kam = tf.transpose(Kma)
+        Kmm = self.kernel(inducing_variable) + np.eye(len(Xind.numpy()), dtype=np.float64) * self.jitter
+        L_Kmm = tf.linalg.cholesky(Kmm)
+        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)  # Ax = b, x= A-1b
+        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
+
+        # Use above to compute approximations and diagonal
+        Qaa = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kma)
+        Qab = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kmb)
+        Qba = tf.transpose(Qab)
+        Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb)
+        Lambda = tf.linalg.diag(tf.linalg.diag_part(Kaa - Qaa))
+        Lambda_t = tf.linalg.diag(tf.linalg.diag_part(Kbb - Qbb))
+
+        #tf.print(self.inducing_variable.Z)
+        if self.exact_target:
+            K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qba), 0), tf.concat((Qab, Kbb), 0)), 1)
+        else:
+            K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qba), 0), tf.concat((Qab, Qbb + Lambda_t), 0)), 1)
+        noise_ab = tf.concat((self.likelihood.source.variance_at(Ax), self.likelihood.target.variance_at(Bx)), 0)[:, 0]
+        L_Kfitc = tf.linalg.cholesky(K_fitc + tf.linalg.diag(noise_ab) + tf.eye(len(Xs), dtype=tf.float64) * self.jitter)
+        #L_Kfitc = tf.linalg.cholesky(K_fitc + tf.eye(len(Xs), dtype=tf.float64) * self.jitter)
 
         #tf.print(kmm_plus_s.shape)
         # Construct Kmn
-        Knm = self.kernel(Xs, Xnew)
-        Lkmm = tf.linalg.cholesky(kmm_plus_s)
-        KnminvLmm = tf.linalg.triangular_solve(Lkmm, Knm) #Lkmm-1 Knm
-        tf.print(KnminvLmm.shape)
-        Lkmmy = tf.linalg.triangular_solve(Lkmm, err) # Lkmm-1 err
+        Knm = self.kernel(Xs, inducing_variable) @ tf.linalg.inv(Kmm) @ self.kernel(inducing_variable, Xnew)
+        LfitcKnm = tf.linalg.triangular_solve(L_Kfitc, Knm)
+        Kfitcy = tf.linalg.cholesky_solve(L_Kfitc, err)
       
-        cond = tf.transpose(KnminvLmm) @ KnminvLmm
-        f_mean_zero = tf.transpose(KnminvLmm) @ Lkmmy
-        fvar = tf.expand_dims(tf.linalg.diag_part(knn - cond), 1)
+        cond = tf.transpose(LfitcKnm) @ LfitcKnm  
+        f_mean_zero = tf.transpose(Knm) @ Kfitcy
+        f_var = tf.expand_dims(tf.linalg.diag_part(knn - cond), 1)
         #tf.print("fm0", f_mean_zero.shape)
-        f_mean = f_mean_zero + self.mean_function(Xnew)
-        return f_mean, fvar
+        f_mean = f_mean_zero + self.mean_function(Xnew[:,0][:,None])
+        return f_mean, f_var
+  
 
 def optimize(m):
     opt = gpf.optimizers.Scipy()
