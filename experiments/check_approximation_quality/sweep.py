@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import gpflow as gpf
 import tensorflow as tf
 import sys
+import time
 sys.path.append("/home/janneke/repos/at-gpflow/")
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
@@ -21,6 +22,8 @@ props = np.arange(0.05, 2, 0.05)
 
 vgp_mse = np.zeros((len(props), tries))
 cmogp_mse = np.zeros((len(props), tries))
+vgp_times = np.zeros((len(props), tries))
+cmogp_times = np.zeros((len(props), tries))
 
 for i, target_proportion in enumerate(props):
     for j in range(tries):
@@ -76,7 +79,9 @@ for i, target_proportion in enumerate(props):
         cmogp  = ConditionalMOGP((X, y), kernel=kern, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
 
         gpf.utilities.print_summary(cmogp)
+        t = time.time()
         optimize(cmogp)
+        dt = t - time.time()
         gpf.utilities.print_summary(cmogp)
         Xall = Xall.reshape(-1, 1)
         Xtst = Xtest.reshape(-1, 1)
@@ -86,6 +91,7 @@ for i, target_proportion in enumerate(props):
         cmogp_fmse = mean_squared_error(ytest, fmean_tst)
 
         cmogp_mse[i, j] = cmogp_fmse
+        cmogp_times[i, j] = dt
 
         ############ SVGP ##############
         output_dim = 2  # Number of outputs
@@ -115,11 +121,13 @@ for i, target_proportion in enumerate(props):
 
         gpf.utilities.print_summary(svgp)
         # fit the covariance function parameters
+        vt = time.time()
         gpf.optimizers.Scipy().minimize(
             svgp.training_loss_closure((X, y)),
             svgp.trainable_variables,
             method="L-BFGS-B",
         )
+        vdt = vt - time.time()
         gpf.utilities.print_summary(svgp)
         Xall = Xall.reshape(-1, 1)
         Xtst = Xtest.reshape(-1, 1)
@@ -128,6 +136,7 @@ for i, target_proportion in enumerate(props):
         fmean_tst, fvar_tst = svgp.predict_f(Xtst)
         vgp_fmse = mean_squared_error(ytest, fmean_tst)
         vgp_mse[i, j] = vgp_fmse
+        vgp_times[i, j] = vdt
 
 np.savez("/home/janneke/repos/at-gpflow/experiments/check_approximation_quality/results_sweep.npz", vgp_mse=vgp_mse, cmogp_mse=cmogp_mse)
 res = np.load("/home/janneke/repos/at-gpflow/experiments/check_approximation_quality/results_sweep.npz")

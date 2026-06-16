@@ -185,7 +185,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
         # Approximate matrices
         inducing_variable = tf.concat((self.inducing_variable.Z, self.inducing_indices), -1)
-        Kmm = self.kernel(inducing_variable) + tf.eye(len(inducing_variable), dtype=tf.float64) * self.jitter
+        Kmm = self.kernel(inducing_variable) # + tf.eye(len(inducing_variable), dtype=tf.float64) * self.jitter
         Kma = self.kernel(inducing_variable, Xs[As])
         Kmb = self.kernel(inducing_variable, Xs[Bs])
         Kam = tf.transpose(Kma)
@@ -288,13 +288,13 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Qba = tf.transpose(Qab)
         Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb)
 
-        # Full approximations of the exact matrices
+        # Full approximations of the exact matrices, target
         diag_Qtt = tf.linalg.diag_part(Qbb)
         diag_Ktt = tf.linalg.diag_part(Kbb)
         sigma_t = tf.squeeze(self.likelihood.target.variance_at(Bx))
         D_b = (diag_Ktt - diag_Qtt) + sigma_t
 
-        # Full approximations of the exact matrices
+        # Full approximations of the exact matrices, source
         diag_Qss = tf.linalg.diag_part(Qaa)
         diag_Kss = tf.linalg.diag_part(Kaa)
         sigma_s = tf.squeeze(self.likelihood.source.variance_at(Ax))
@@ -327,6 +327,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         cond = tf.transpose(Knm) @ K_fic_inv @ Knm
         f_mean_zero = tf.transpose(Knm) @ K_fic_inv @ err
         f_var = tf.expand_dims(tf.linalg.diag_part(knn - cond), 1)
+
         #tf.print("fm0", f_mean_zero.shape)
         f_mean = f_mean_zero + self.mean_function(Xnew[:,0][:,None])
         return f_mean, f_var
@@ -388,7 +389,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         else:
             K_fitc = tf.concat((tf.concat((Qaa + Lambda, Qba), 0), tf.concat((Qab, Qbb + Lambda_t), 0)), 1)
         noise_ab = tf.concat((self.likelihood.source.variance_at(Ax), self.likelihood.target.variance_at(Bx)), 0)[:, 0]
-        L_Kfitc = tf.linalg.cholesky(K_fitc + tf.linalg.diag(noise_ab) + tf.eye(len(Xs), dtype=tf.float64) * self.jitter)
+        L_Kfitc = tf.linalg.cholesky(K_fitc + tf.linalg.diag(noise_ab))
         #L_Kfitc = tf.linalg.cholesky(K_fitc + tf.eye(len(Xs), dtype=tf.float64) * self.jitter)
 
         #tf.print(kmm_plus_s.shape)
