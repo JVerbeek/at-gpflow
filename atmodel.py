@@ -79,7 +79,7 @@ class WeightedCMOGP():
         quad_part = tf.matmul(alpha_t, alpha_t, transpose_a=True)
         
         lml_part_1 = -0.5 * (logdet_t + quad_part + n_target * tf.cast(tf.math.log(2*np.pi), Ax.dtype)) 
-        
+        lml_part_2 = -0.5 * (logdet_s + quad_part_s + n_source * tf.cast(tf.math.log(2*np.pi), Ax.dtype)) 
         return tf.squeeze(lml)
 
     def maximum_log_likelihood_objective(self):
