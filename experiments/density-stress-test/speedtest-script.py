@@ -6,11 +6,11 @@ import sys
 sys.path.append("/home/janneke/repos/at-gpflow/")
 from atmodel import SparseCMOGP
 from atlikelihood import TransferLikelihood
-n_steps = 8
+n_steps = 9
 n_tries = 10
 
 times = np.zeros((n_steps, n_tries)) 
-for j, NDP in enumerate(np.logspace(6, 11, n_steps, base=2)):
+for j, NDP in enumerate(np.logspace(6, 15, n_steps, base=2)):
     continue
     print(int(NDP))
     gen_k = gpf.kernels.RBF(lengthscales=5, variance=1) #+ gpf.kernels.Linear(0.001)
@@ -67,9 +67,10 @@ for j, NDP in enumerate(np.logspace(6, 11, n_steps, base=2)):
         dt_opt = time.time() - t_opt
         times[j, i] = dt_opt
 
+np.savez("results-times.npz", times)
+
 ticks = np.linspace(6, 11, 8).astype(int)
-times = [ 1.14012425,  1.06276362,  1.12836003,  1.23768082, 1.56313865,  6.22101068, 12.519521,   26.18981016]
-plt.plot(ticks, times)
+plt.plot(ticks, np.log2(times))
 plt.xlabel("n_points")
 plt.xticks(ticks, [f"$2^{{ {t} }}$" for t in ticks])
 plt.ylabel("$\Delta$t, 50 steps")
