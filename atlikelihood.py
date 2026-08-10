@@ -11,7 +11,7 @@ from gpflow.utilities.parameter_or_function import (
 )
 class TransferLikelihood(ScalarLikelihood):
     """Copiloted the boilerplate for a custom likelihood class in GPflow."""
-    def __init__(self, source: Likelihood, target: Likelihood, **kwargs):
+    def __init__(self, source: Likelihood = gpflow.likelihoods.Gaussian(), target: Likelihood = gpflow.likelihoods.Gaussian(), **kwargs):
         super().__init__(**kwargs)
         self.source = source
         self.target = target

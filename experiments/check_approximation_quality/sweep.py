@@ -15,10 +15,10 @@ def optimize(m):
     opt = gpf.optimizers.Scipy()
     res = opt.minimize(m.training_loss, m.trainable_variables, options={"disp": 50})
 
-tries = 10
+tries = 1
 
-source_points = 400
-props = np.arange(0.05, 2, 0.05)
+source_points = 1000
+props = np.arange(0.001, 0.05, 0.05)
 
 vgp_mse = np.zeros((len(props), tries))
 cmogp_mse = np.zeros((len(props), tries))
