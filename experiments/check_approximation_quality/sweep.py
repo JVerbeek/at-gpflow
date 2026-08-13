@@ -4,7 +4,7 @@ import gpflow as gpf
 import tensorflow as tf
 import sys
 import time
-sys.path.append("/home/janneke/repos/at-gpflow/")
+sys.path.append("/home/janneke/src/at-gpflow/")
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 
@@ -13,12 +13,15 @@ from atlikelihood import TransferLikelihood
 
 def optimize(m):
     opt = gpf.optimizers.Scipy()
-    res = opt.minimize(m.training_loss, m.trainable_variables, options={"disp": 50})
+    res = opt.minimize(m.training_loss, m.trainable_variables, options={"disp": 50}, method="L-BFGS-B",)
+
+def get_kernel():
+    return gpf.kernels.Matern32()
 
 tries = 1
 
-source_points = 1000
-props = np.arange(0.001, 0.05, 0.05)
+NDP = 3000
+props = np.arange(0.01, 0.1, 0.005)
 
 vgp_mse = np.zeros((len(props), tries))
 cmogp_mse = np.zeros((len(props), tries))
@@ -28,14 +31,11 @@ cmogp_times = np.zeros((len(props), tries))
 for i, target_proportion in enumerate(props):
     for j in range(tries):
         k = gpf.kernels.RBF(lengthscales=3, variance=1) #+ gpf.kernels.Linear(0.001)
-        NSP = source_points
-        NTP = int(source_points * target_proportion)
-        Xall = np.linspace(0, 50, NSP)
+        Xall = np.linspace(0, 50, NDP)
         Yall  = np.random.multivariate_normal(np.zeros_like(Xall), k(Xall.reshape(-1, 1)))
-        ind_1 = np.arange(0, NSP, 1)
-        ind_2 = np.linspace(0, 50, NTP).astype(int)
+        ind_1 = np.arange(0, NDP, 1)
+        ind_2 = np.linspace(0, NDP-1, int(target_proportion*NDP)).astype(int)
         TEST_INDEX = int(0.8*len(ind_2))
-
         ind_train, ind_test = ind_2[:TEST_INDEX], ind_2[TEST_INDEX:]
         X1, y1 = Xall[ind_1], Yall[ind_1] #+ np.random.multivariate_normal(np.zeros_like(Xall[ind_1]), gpf.kernels.Cosine(variance=1, lengthscales=10)(Xall[ind_1].reshape(-1, 1)))
         X2 = Xall[ind_train]
@@ -43,21 +43,24 @@ for i, target_proportion in enumerate(props):
 
         X2 = X2 - X2[0]
         scalar = -1
-        y2 = (scalar * y2 + np.random.normal(0, 0.3, len(y2))).reshape(-1, 1)
+        y2 = (scalar * y2 + np.random.normal(0, 0.1, len(y2))).reshape(-1, 1)
         Xtest, ytest = Xall[ind_test], Yall[ind_test]
-        ytest =  (ytest * scalar + np.random.normal(0, 0.3, len(ytest))).reshape(-1, 1)
+        ytest =  (ytest * scalar + np.random.normal(0, 0.1, len(ytest))).reshape(-1, 1)
         ytest = ytest
         Xtest = Xtest
 
-        y1 = y1.reshape(-1, 1) + np.random.normal(0, 0.3, len(X1)).reshape(-1, 1)
+        y1 = y1.reshape(-1, 1) + np.random.normal(0, 0.1, len(X1)).reshape(-1, 1)
         y2 = y2.reshape(-1, 1) 
         X1 = X1.reshape(-1, 1)
         X2 = X2.reshape(-1, 1)
+        plt.plot(X1, y1, marker=".")
+        plt.plot(X2, y2, marker=".", color="red")
+        plt.plot(Xtest, ytest, marker=".")
         X = np.vstack((np.hstack((X1, np.zeros_like(X1))), np.hstack((X2, np.ones_like(X2)))))
         y = np.vstack((np.hstack((y1, np.zeros_like(y1))), np.hstack((y2, np.ones_like(y2)))))
+        plt.show()
         X = tf.cast(X, np.float64)
-        y = tf.cast(y, np.float64)
-        
+        y = tf.cast(y, np.float64) 
         ############ cMOGP ##############
         output_dim = 2  # Number of outputs
         rank = 1  # Rank of W
@@ -76,22 +79,25 @@ for i, target_proportion in enumerate(props):
         ivs = ivs[shuffle]
         ivs = np.hstack((ivs, iv_ind))
         kern = k * coreg
-        cmogp  = ConditionalMOGP((X, y), kernel=kern, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
+        cmogp  = SparseCMOGP((X, y), jitter=1e-6, kernel=kern, inducing_variable=ivs, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
 
-        gpf.utilities.print_summary(cmogp)
         t = time.time()
         optimize(cmogp)
-        dt = t - time.time()
-        gpf.utilities.print_summary(cmogp)
+        dt = time.time() - t
         Xall = Xall.reshape(-1, 1)
         Xtst = Xtest.reshape(-1, 1)
         Xplot = np.hstack((Xall, np.ones_like(Xall)))
         Xtst = np.hstack((Xtst, np.ones_like(Xtst)))
         fmean_tst, fvar_tst = cmogp.predict_f(Xtst)
-        cmogp_fmse = mean_squared_error(ytest, fmean_tst)
-
-        cmogp_mse[i, j] = cmogp_fmse
+        fmean_tst = fmean_tst.numpy()
         cmogp_times[i, j] = dt
+
+        try: 
+            cmogp_fmse = mean_squared_error(ytest, fmean_tst)
+
+            cmogp_mse[i, j] = cmogp_fmse
+        except ValueError:
+            cmogp_mse[i, j] = -1
 
         ############ SVGP ##############
         output_dim = 2  # Number of outputs
@@ -101,7 +107,7 @@ for i, target_proportion in enumerate(props):
 
         # Coregion kernel
         coreg = gpf.kernels.Coregion(
-            output_dim=output_dim, rank=rank, active_dims=[1]
+            output_dim=output_dim, rank=rank, active_ims=[1]
         )
 
         kern = k * coreg
@@ -119,28 +125,31 @@ for i, target_proportion in enumerate(props):
         # now build the GP model as normal
         svgp = gpf.models.SVGP(kernel=kern, likelihood=lik, num_data=len(X), inducing_variable=ivs)
 
-        gpf.utilities.print_summary(svgp)
         # fit the covariance function parameters
-        vt = time.time()
+        t = time.time()
         gpf.optimizers.Scipy().minimize(
             svgp.training_loss_closure((X, y)),
             svgp.trainable_variables,
             method="L-BFGS-B",
         )
-        vdt = vt - time.time()
-        gpf.utilities.print_summary(svgp)
+        dt = time.time() - t 
         Xall = Xall.reshape(-1, 1)
         Xtst = Xtest.reshape(-1, 1)
         Xplot = np.hstack((Xall, np.ones_like(Xall)))
         Xtst = np.hstack((Xtst, np.ones_like(Xtst)))
         fmean_tst, fvar_tst = svgp.predict_f(Xtst)
-        vgp_fmse = mean_squared_error(ytest, fmean_tst)
-        vgp_mse[i, j] = vgp_fmse
-        vgp_times[i, j] = vdt
+        fmean_tst = fmean_tst.numpy()
+        try: 
+            vgp_fmse = mean_squared_error(ytest, fmean_tst)
+            vgp_mse[i, j] = vgp_fmse
+        except ValueError:
+            vgp_mse[i, j] = -1
+        vgp_times[i, j] = dt
 
-np.savez("/home/janneke/repos/at-gpflow/experiments/check_approximation_quality/results_sweep.npz", vgp_mse=vgp_mse, cmogp_mse=cmogp_mse)
-res = np.load("/home/janneke/repos/at-gpflow/experiments/check_approximation_quality/results_sweep.npz")
+        np.savez("/home/janneke/src/at-gpflow/experiments/check_approximation_quality/results_sweep_single_try.npz", vgp_mse=vgp_mse, cmogp_mse=cmogp_mse, vgp_times=vgp_times, cmogp_times=cmogp_times)
+res = np.load("/home/janneke/src/at-gpflow/experiments/check_approximation_quality/results_sweep_single_try.npz")
 
+print(res["cmogp_times"])
+print(res["vgp_times"])
 print(res["cmogp_mse"])
 print(res["vgp_mse"])
-

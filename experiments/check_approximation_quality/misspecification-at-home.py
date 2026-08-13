@@ -29,15 +29,15 @@ for i, prop in enumerate(np.arange(0, 1, 0.1)):
     print("*"*10, "proportion", prop, "*"*10)
     for j in range(repetitions):
         print("REPETITION", j)
-        Xs = np.linspace(0, 50, 500).reshape(-1, 1)
-        Xt = np.linspace(0, 50, 500).reshape(-1, 1)
+        Xs = np.linspace(0, 50, 250).reshape(-1, 1)
+        Xt = np.linspace(0, 50, 250).reshape(-1, 1)
         f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=10)(Xs))
         f2 = np.random.multivariate_normal(np.zeros_like(Xt.flatten()), gpf.kernels.RBF(lengthscales=3)(Xt))
 
         ys = (prop * f1 + (1-prop) * f2 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
         yt = ((1-prop)* f1 + prop * f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
-        yt = [y for i, y in enumerate(yt) if i % 10 == 0]
-        Xt = [x for i, x in enumerate(Xt) if i % 10 == 0]
+        yt = [y for i, y in enumerate(yt) if i % 1 == 0]
+        Xt = [x for i, x in enumerate(Xt) if i % 1 == 0]
         yt_train = yt[:int(len(Xt)*0.75)]
         Xt_train = Xt[:int(len(Xt)*0.75)]
         yt_test = yt[int(len(Xt)*0.75):]
