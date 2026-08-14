@@ -3,21 +3,19 @@ import gpflow as gpf
 import matplotlib.pyplot as plt
 import time 
 import sys
-sys.path.append("/home/janneke/repos/at-gpflow/")
+sys.path.append("/home/janneke/src/at-gpflow/")
 from atmodel import SparseCMOGP
 from atlikelihood import TransferLikelihood
 n_steps = 9
 n_tries = 10
 
 times = np.zeros((n_steps, n_tries)) 
-for j, NDP in enumerate(np.logspace(6, 15, n_steps, base=2)):
-    continue
-    print(int(NDP))
+for j, NDP in enumerate(np.logspace(8, 15, n_steps, base=2)):
     gen_k = gpf.kernels.RBF(lengthscales=5, variance=1) #+ gpf.kernels.Linear(0.001)
     Xall = np.linspace(0, 50, int(NDP))
     Yall  = np.random.multivariate_normal(np.zeros_like(Xall), gen_k(Xall.reshape(-1, 1)))
     ind_1 = np.arange(0, int(NDP), 1)
-    ind_2 = np.linspace(0, 50, 50).astype(int)
+    ind_2 = np.linspace(0, NDP-1, int(0.1*NDP)).astype(int)
 
     TEST_INDEX = int(0.8*len(ind_2))
     ind_train, ind_test = ind_2[:TEST_INDEX], ind_2[TEST_INDEX:]
@@ -40,9 +38,10 @@ for j, NDP in enumerate(np.logspace(6, 15, n_steps, base=2)):
 
     X = np.vstack((np.hstack((X1, np.zeros_like(X1))), np.hstack((X2, np.ones_like(X2)))))
     y = np.vstack((np.hstack((y1, np.zeros_like(y1))), np.hstack((y2, np.ones_like(y2)))))
-
+    plt.plot(X1, y1)
+    plt.plot(X2, y2)
+    plt.show()
     for i in range(n_tries):
-
         output_dim = 2  # Number of outputs
         rank = 1  # Rank of W
 
@@ -60,13 +59,27 @@ for j, NDP in enumerate(np.logspace(6, 15, n_steps, base=2)):
         shuffle = np.random.permutation(np.arange(len(ivs)))
         ivs = ivs[shuffle]
         ivs = np.hstack((ivs, iv_ind))
-        t_opt = time.time()
         m = SparseCMOGP((X, y), exact_target=False, kernel=kern, jitter=1e-5, inducing_variable=ivs, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
+        t_opt = time.time()
         opt = gpf.optimizers.Scipy()
         opt.minimize(m.training_loss, m.trainable_variables, options={"disp": 50, "maxiter": 50})
         dt_opt = time.time() - t_opt
-        times[j, i] = dt_opt
+        sparse_times[j, i] = dt_opt
 
+        k = gpf.kernels.Matern32(active_dims=[0])
+
+        # Coregion kernel
+        coreg = gpf.kernels.Coregion(
+            output_dim=output_dim, rank=rank, active_dims=[1]
+        )
+        kern = k * coreg
+
+        m = ConditionalMOGP((X, y), kernel=kern, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
+        t_opt = time.time()
+        opt = gpf.optimizers.Scipy()
+        opt.minimize(m.training_loss, m.trainable_variables, options={"disp": 50, "maxiter": 50})
+        dt_opt = time.time() - t_opt
+        full_times[j, i] = dt_opt
 np.savez("results-times.npz", times)
 
 ticks = np.linspace(6, 11, 8).astype(int)
