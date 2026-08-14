@@ -14,27 +14,7 @@ import gpflow
 
 class ConstrainedCoregion(Kernel):
     """
-    A Coregionalization kernel. The inputs to this kernel are _integers_ (we
-    cast them from floats as needed) which usually specify the *outputs* of a
-    Coregionalization model.
-
-    The kernel function is an indexing of a positive-definite matrix:
-
-      K(x, y) = B[x, y] .
-
-    To ensure that B is positive-definite, it is specified by the two
-    parameters of this kernel, W and kappa:
-
-      B = W Wᵀ + diag(kappa) .
-
-    We refer to the size of B as "output_dim x output_dim", since this is the
-    number of outputs in a coregionalization model. We refer to the number of
-    columns on W as 'rank': it is the number of degrees of correlation between
-    the outputs.
-
-    NB. There is a symmetry between the elements of W, which creates a local
-    minimum at W=0. To avoid this, it is recommended to initialize the
-    optimization (or MCMC chain) using a random W.
+    Coregionalization kernel, but coregion matrix is forced to contain values between -1 and 1. 
     """
 
     def __init__(

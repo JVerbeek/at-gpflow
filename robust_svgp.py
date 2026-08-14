@@ -3,10 +3,12 @@ from gpflow.inducing_variables import InducingVariables, InducingPoints
 import gpflow 
 import tensorflow as tf 
 import tensorflow_probability as tfp
-import numpy as np 
+import numpy as np
+
 class LMCInducingPointsBase(InducingPoints):
     def __init__(self, Z, name = None):
         """
+        Inducing points, but the coregionalization indices are not allowed to move.
         :param Z: The initial positions of the inducing points.
         """
         if not isinstance(Z, (tf.Variable, tfp.util.TransformedVariable)):
