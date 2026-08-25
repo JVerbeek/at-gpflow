@@ -4,6 +4,7 @@ import numpy as np
 from gpflow.models.training_mixins import InternalDataTrainingLossMixin
 import matplotlib.pyplot as plt
 from gpflow.inducing_variables import InducingPoints
+from gpflow.models.util import inducingpoint_wrapper
 
 
 class WeightedJointMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
@@ -430,8 +431,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         self.data = data
         self.kernel = kernel
         self.likelihood = likelihood
-        self.inducing_variable = InducingPoints(inducing_variable[:, 0].reshape(-1, 1))
-        self.inducing_indices = inducing_variable[:, 1].reshape(-1, 1)
+        self.inducing_variable = inducingpoint_wrapper(inducing_variable) #InducingPoints(inducing_variable[:, 0].reshape(-1, 1))
         self.mean_function = gpf.mean_functions.Zero()
         self.conditioning_indices = [0]
         self.opt_logs = []
@@ -463,9 +463,10 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Kaa = self.kernel(Xs[As])
 
         # Approximate matrices
-        inducing_variable = tf.concat(
-            (self.inducing_variable.Z, self.inducing_indices), -1
-        )
+        # inducing_variable = tf.concat(
+        #     (self.inducing_variable.Z, self.inducing_indices), -1
+        # )
+        inducing_variable = self.inducing_variable.Z
         Kmm = self.kernel(
             inducing_variable
         )  + tf.eye(len(inducing_variable), dtype=tf.float64) * self.jitter
@@ -574,9 +575,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Kaa = self.kernel(Xs[As])
 
         # Compute inducing points x rest data
-        inducing_variable = tf.concat(
-            (self.inducing_variable.Z, self.inducing_indices), -1
-        )
+        inducing_variable = self.inducing_variable.Z 
         Kma = self.kernel(inducing_variable, Xs[As])
         Kmb = self.kernel(inducing_variable, Xs[Bs])
         Kam = tf.transpose(Kma)

@@ -53,12 +53,8 @@ for i, target_proportion in enumerate(props):
         y2 = y2.reshape(-1, 1) 
         X1 = X1.reshape(-1, 1)
         X2 = X2.reshape(-1, 1)
-        plt.plot(X1, y1, marker=".")
-        plt.plot(X2, y2, marker=".", color="red")
-        plt.plot(Xtest, ytest, marker=".")
         X = np.vstack((np.hstack((X1, np.zeros_like(X1))), np.hstack((X2, np.ones_like(X2)))))
         y = np.vstack((np.hstack((y1, np.zeros_like(y1))), np.hstack((y2, np.ones_like(y2)))))
-        plt.show()
         X = tf.cast(X, np.float64)
         y = tf.cast(y, np.float64) 
         ############ cMOGP ##############
@@ -107,7 +103,7 @@ for i, target_proportion in enumerate(props):
 
         # Coregion kernel
         coreg = gpf.kernels.Coregion(
-            output_dim=output_dim, rank=rank, active_ims=[1]
+            output_dim=output_dim, rank=rank, active_dims=[1]
         )
 
         kern = k * coreg
