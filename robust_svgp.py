@@ -16,7 +16,7 @@ class LMCInducingVariable(InducingVariables):
                 indices = Parameter(Z[:,1][:,None], trainable=False)
                 Z = Parameter(Z[:,0][:,None])
 
-        self.Z = Parameter(tf.concat((Z, indices), 1))
+        self.Z = tf.concat((Z, indices), 1)
 
     @property
     def num_inducing(self):

@@ -236,15 +236,15 @@ plt.colorbar(im, ax=ax, shrink=0.8)
 ax.set_title("Inter-Station Correlation (VWC 5cm, daily)\nHigh correlation → multi-output GP / transfer learning viable",
              fontweight="bold")
 fig.tight_layout()
-fig.savefig(OUT_DIR / "fig5_interstation_correlation.png", bbox_inches="tight")
-print(f"  Saved {OUT_DIR / 'fig5_interstation_correlation.png'}")
+fig.savefig(OUT_DIR / "fig5_5cm_interstation_correlation.png", bbox_inches="tight")
+print(f"  Saved {OUT_DIR / 'fig5_5cm_interstation_correlation.png'}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FIGURE 6: Cross-depth correlation within station (RM01)
 # ══════════════════════════════════════════════════════════════════════════════
 
 print("Plotting Figure 6: Cross-depth correlation (RM01)...")
-df01 = raw["RM_SM_01"][VWC_COLS].resample("D").mean()
+df01 = raw["RM_SM_14"][VWC_COLS].resample("D").mean()
 df01.columns = [f"{d} cm" for d in DEPTHS]
 corr_depth = df01.corr()
 

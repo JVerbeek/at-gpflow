@@ -1,14 +1,17 @@
 import gpflow as gpf
 import tensorflow as tf
+tf.random.set_seed(42)
 import numpy as np
+np.random.seed(42)
 import sys
 sys.path.append("/home/janneke/src/at-gpflow")
 from gpflow.models.training_mixins import InternalDataTrainingLossMixin
 import matplotlib.pyplot as plt
 from atlikelihood import TransferLikelihood
 from sklearn.metrics import mean_squared_error
-from atmodel import ConditionalMOGP, SparseCMOGP
+from atmodel import ConditionalMOGP, SparseCMOGP, SparseCMOGP_QR
 from atlikelihood import TransferLikelihood
+from robust_svgp import LMCInducingPointsBase
 
 def optimize(m):
     opt = gpf.optimizers.Scipy()
@@ -23,31 +26,31 @@ repetitions = 20
 proportions = np.arange(0, 1, 0.1)
 
 results_svgp = np.zeros((len(proportions), repetitions))
+results_cmogp_qr = np.zeros((len(proportions), repetitions))
 results_cmogp = np.zeros((len(proportions), repetitions))
 
-for i, prop in enumerate(np.arange(0, 1, 0.1)):
-    print("*"*10, "proportion", prop, "*"*10)
-    for j in range(repetitions):
-        print("REPETITION", j)
-        Xs = np.linspace(0, 50, 250).reshape(-1, 1)
-        Xt = np.linspace(0, 50, 250).reshape(-1, 1)
-        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=10)(Xs))
-        f2 = np.random.multivariate_normal(np.zeros_like(Xt.flatten()), gpf.kernels.RBF(lengthscales=3)(Xt))
+for i, prop in enumerate(np.arange(0.1, 1, 0.1)):
+    print("*"*10, "dataset", i+1, "*"*10)
+    Xs = np.linspace(0, 50, 1000).reshape(-1, 1)
+    Xt = np.linspace(0, 50, 1000).reshape(-1, 1)
+    f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=10, variance=5)(Xs))
+    f2 = np.random.multivariate_normal(np.zeros_like(Xt.flatten()), gpf.kernels.RBF(lengthscales=3)(Xt))
 
-        ys = (prop * f1 + (1-prop) * f2 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
-        yt = ((1-prop)* f1 + prop * f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
-        yt = [y for i, y in enumerate(yt) if i % 1 == 0]
-        Xt = [x for i, x in enumerate(Xt) if i % 1 == 0]
-        yt_train = yt[:int(len(Xt)*0.75)]
-        Xt_train = Xt[:int(len(Xt)*0.75)]
-        yt_test = yt[int(len(Xt)*0.75):]
-        Xt_test = Xt[int(len(Xt)*0.75):]
+    ys = (f1 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
+    yt = (1.5 * f1 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
+    yt = [y for i, y in enumerate(yt) if i % 10 == 0]
+    Xt = [x for i, x in enumerate(Xt) if i % 10 == 0]
+    yt_train = yt[:int(len(Xt)*0.75)]
+    Xt_train = Xt[:int(len(Xt)*0.75)]
+    yt_test = yt[int(len(Xt)*0.75):]
+    Xt_test = Xt[int(len(Xt)*0.75):]
 
-        X = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt, np.ones_like(Xt)))))
-        y = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt, np.ones_like(yt)))))
-
+    X = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt_train, np.ones_like(Xt_train)))))
+    y = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt_train, np.ones_like(yt_train)))))
+    for j, nIVS in enumerate(range(10, 100, 10)):
+        print("# inducing", nIVS)
         output_dim = 2  # Number of outputs
-        rank = 1  # Rank of W
+        rank = 1 # Rank of W
 
         # Base kernel
         k = get_kernel() 
@@ -58,13 +61,13 @@ for i, prop in enumerate(np.arange(0, 1, 0.1)):
         )
 
 
-        ivs = np.linspace(0, max(X[:,0]), 50).reshape(-1, 1)
-        iv_ind = np.concatenate((np.ones((25,1 )), np.zeros((25, 1))))
+        ivs = np.linspace(0, max(X[:,0]), nIVS).reshape(-1, 1)
+        iv_ind = np.concatenate((np.ones((int(nIVS/2),1 )), np.zeros((int(nIVS/2), 1))))
         shuffle = np.random.permutation(np.arange(len(ivs)))
         ivs = ivs[shuffle]
         ivs = np.hstack((ivs, iv_ind))
         kern = k * coreg 
-        m = SparseCMOGP((X, y), jitter=1e-5, inducing_variable=ivs, kernel=kern, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
+        m = SparseCMOGP((X, y), conditioning_index=1, exact_target=False, jitter=1e-4, inducing_variable=LMCInducingPointsBase(ivs), kernel=kern, likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
         #gpf.set_trainable(m.kernel.kernels[0].variance, True)
         #gpf.set_trainable(m.likelihood.source.variance, False)
 
@@ -75,6 +78,7 @@ for i, prop in enumerate(np.arange(0, 1, 0.1)):
 
         cmogp_mse = mean_squared_error(yt_test, fmean_tst)
         results_cmogp[i, j] = cmogp_mse
+
         # This likelihood switches between Gaussian noise with different variances for each f_i:
         from robust_svgp import LMCInducingPointsBase
         output_dim = 2  # Number of outputs
@@ -94,8 +98,8 @@ for i, prop in enumerate(np.arange(0, 1, 0.1)):
             source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()
         )
 
-        ivs = np.linspace(0, max(X[:,0]), 50).reshape(-1, 1)
-        iv_ind = np.concatenate((np.ones((25,1 )), np.zeros((25, 1))))
+        ivs = np.linspace(0, max(X[:,0]), nIVS).reshape(-1, 1)
+        iv_ind = np.concatenate((np.ones((int(nIVS/2),1 )), np.zeros((int(nIVS/2), 1))))
         ivs = ivs[shuffle]
         ivs = np.hstack((ivs, iv_ind))
         # now build the GP model as normal
@@ -119,4 +123,4 @@ for i, prop in enumerate(np.arange(0, 1, 0.1)):
         
         print("CMOGP:", cmogp_mse)
         print("SVGP:", svgp_mse)
-        np.savez("results_at_home_matern32", svgp=results_svgp, cmogp=results_cmogp)
+        np.savez("results_inducing_points_mixture", svgp=results_svgp, cmogp=results_cmogp)
