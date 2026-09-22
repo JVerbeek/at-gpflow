@@ -255,7 +255,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             C_t = Kbb - Qbb + BmWmt + tf.linalg.diag(D_t)
 
         delta = By - mu_t
-        L_t = tf.linalg.cholesky(C_t)
+        L_t = tf.linalg.cholesky(C_t + tf.eye(C_t.shape[0], dtype=tf.float64) * self.jitter)
         alpha_t = tf.linalg.triangular_solve(L_t, delta)
         n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
         logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
@@ -369,10 +369,6 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         C_b = BmWmt + tf.linalg.diag(D_b)
         D_b_inv = tf.linalg.diag(1.0 / D_b)
         Qbb_inv = D_b_inv - D_b_inv @ tf.transpose(Kmb) @ tf.linalg.inv(W + Kmb @ D_b_inv @ tf.transpose(Kmb)) @ Kmb @ D_b_inv
-        # L_Qbb = tf.linalg.cholesky(C_b)  # order N_t
-        # Qbb_inv = tf.linalg.cholesky_solve(
-        #     L_Qbb, np.eye(len(Bx))
-        # )  # LL^T x = I, x = (LL^T)^1
 
         A = Qaa_inv + Qaa_inv @ Qab @ Qbb_inv @ Qba @ Qaa_inv
         B = -Qaa_inv @ Qab @ Qbb_inv
@@ -709,13 +705,16 @@ class SparseCMOGP_QR(gpf.models.GPModel, InternalDataTrainingLossMixin):
         sigma_s = tf.squeeze(self.likelihood.source.variance_at(Ax))
         D_a = (diag_Kss - diag_Qss) + sigma_s
 
-        W = Kmm + Kma @ tf.linalg.diag(1.0 / D_a) @ Kam  # [3]
-        Lw = tf.linalg.cholesky(W)
+        W = Kmm + tf.transpose(Rma) @ tf.transpose(Qma) @ tf.linalg.diag(1.0 / D_a) @ Qma @ Rma # [3]
+        Lw = tf.linalg.cholesky(W)  # [3]
 
         BmWmt = tf.transpose(Kmb) @ tf.linalg.cholesky_solve(
             Lw, Kmb
         )  # LwLw^T x = Kmb, x = W^1 Kmb
 
+        mu_t = Qmb @ Rmb @ tf.linalg.cholesky_solve(
+            Lw, tf.transpose(Rmb) @ tf.transpose(Qmb)
+        )  # Kbm W^1 Kma Ds^-1 Ay
         # Blockwise inversion of K_fic
         D_a_inv = tf.linalg.diag(1.0 / D_a)
         M = tf.linalg.cholesky(Kmm + tf.transpose(Rma) @ tf.transpose(Qma) @ D_a_inv @ Qma @ Rma)
