@@ -31,10 +31,10 @@ svgp_mse = np.zeros((10, 2))  # full, sparse
 
 for i in range(10):
     print("*"*20, i, "*"*20)
-    Xs = np.linspace(0, 20, 2000).reshape(-1, 1)
-    Xt = np.linspace(0, 20, 2000).reshape(-1, 1)
+    Xs = np.linspace(0, 20, 200).reshape(-1, 1)
+    Xt = np.linspace(0, 20, 200).reshape(-1, 1)
     f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=5, variance=1)(Xs))
-    f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=1, variance=2)(Xs))
+    f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=1, variance=1)(Xs))
 
     test_size = int(int(len(Xt)) * 0.1)
     start = int(int(len(Xt)) * 0.45)
@@ -48,8 +48,8 @@ for i in range(10):
     X_full = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt_train_full, np.ones_like(Xt_train_full)))))
     y_full = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt_train_full, np.ones_like(yt_train_full)))))
 
-    yt_ds = [y for i, y in enumerate(yt) if i % 40 == 0]
-    Xt_ds = [x for i, x in enumerate(Xt) if i % 40 == 0]
+    yt_ds = [y for i, y in enumerate(yt) if i % 4 == 0]
+    Xt_ds = [x for i, x in enumerate(Xt) if i % 4 == 0]
 
     test_size = int(int(len(Xt_ds)) * 0.1)
     start = int(int(len(Xt_ds)) * 0.45)
@@ -83,7 +83,7 @@ for i in range(10):
             source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()
         )
 
-        nIVS = 20 * output_dim
+        nIVS = 100 * output_dim
         ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
         iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
         iv_ind = np.concatenate(iv_ind) 
