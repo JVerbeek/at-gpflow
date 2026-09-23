@@ -33,37 +33,40 @@ for i in range(10):
     print("*"*20, i, "*"*20)
     Xs = np.linspace(0, 20, 200).reshape(-1, 1)
     Xt = np.linspace(0, 20, 200).reshape(-1, 1)
-    f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=5, variance=1)(Xs))
+    f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=5, variance=2)(Xs))
     f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=1, variance=1)(Xs))
 
     test_size = int(int(len(Xt)) * 0.1)
     start = int(int(len(Xt)) * 0.45)
-    ys = (f1 + np.random.normal(0, 0.05, len(Xs))).reshape(-1, 1)
-    yt = (f1 + f2 + np.random.normal(0, 0.05, len(Xt))).reshape(-1, 1)
-    yt_train_full = np.concatenate((yt[:start], yt[start+test_size:]))
-    Xt_train_full = np.concatenate((Xt[:start], Xt[start+test_size:]))
-    yt_test_full = yt[start:start + test_size]
-    Xt_test_full = Xt[start:start + test_size]
+    test_indices = np.random.randint(0, len(Xt), test_size)
+    train_indices = [x for x in np.arange(len(Xt)) if x not in test_indices]
+    
+    ys = (f1 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
+    yt = (f1 + f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
+    yt_train_full = np.concatenate((yt[train_indices], yt[train_indices]))
+    Xt_train_full = np.concatenate((Xt[train_indices], Xt[train_indices]))
+    yt_test_full = yt[test_indices]
+    Xt_test_full = Xt[test_indices]
 
     X_full = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt_train_full, np.ones_like(Xt_train_full)))))
     y_full = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt_train_full, np.ones_like(yt_train_full)))))
 
-    yt_ds = [y for i, y in enumerate(yt) if i % 4 == 0]
-    Xt_ds = [x for i, x in enumerate(Xt) if i % 4 == 0]
+    yt_ds = np.array([y for i, y in enumerate(yt) if i % 5 == 0])
+    Xt_ds = np.array([x for i, x in enumerate(Xt) if i % 5 == 0])
 
     test_size = int(int(len(Xt_ds)) * 0.1)
     start = int(int(len(Xt_ds)) * 0.45)
-
-    yt_train_ds = np.concatenate((yt_ds[:start], yt_ds[start+test_size:]))
-    Xt_train_ds = np.concatenate((Xt_ds[:start], Xt_ds[start+test_size:]))
-    yt_test_ds= yt_ds[start:start + test_size]
-    Xt_test_ds = Xt_ds[start:start + test_size]
+    test_indices = np.random.randint(0, len(Xt_ds), test_size)
+    train_indices = [x for x in np.arange(len(Xt_ds)) if x not in test_indices]
+    yt_train_ds = np.concatenate((yt_ds[train_indices], yt_ds[train_indices]))
+    Xt_train_ds = np.concatenate((Xt_ds[train_indices], Xt_ds[train_indices]))
+    yt_test_ds= yt_ds[test_indices]
+    Xt_test_ds = Xt_ds[test_indices]
 
     X_ds = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt_train_ds, np.ones_like(Xt_train_ds)))))
     y_ds = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt_train_ds, np.ones_like(yt_train_ds)))))
 
 
-    fig, (ax1, ax2) = plt.subplots(1, 2)
     for j, (X, y, Xtest, ytest) in enumerate([(X_full, y_full, Xt_test_full, yt_test_full), (X_ds, y_ds, Xt_test_ds, yt_test_ds)]):
         output_dim = 2  # Number of outputs
         rank = 1  # Rank of W
@@ -83,7 +86,7 @@ for i in range(10):
             source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()
         )
 
-        nIVS = 100 * output_dim
+        nIVS = 30 * output_dim
         ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
         iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
         iv_ind = np.concatenate(iv_ind) 
@@ -134,5 +137,25 @@ for i in range(10):
         mse = mean_squared_error(ytest, fmean_test[:,0])
         print(model2, mse)
         svgp_mse[i, j] = mse
+
+        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+
+        # for model, ax in zip((model1, model2), (ax1, ax2)):
+        #     fmean, fvar = model.predict_f(np.hstack((Xs, np.ones_like(Xs))))
+        #     ax.plot(Xs, ys, color="red")
+        #     ax.plot(Xt_train_full, yt_train_full, color="orchid")
+        #     ax.plot(Xt_train_ds, yt_train_ds, color="purple")
+        #     ax.plot(Xt_test_ds, yt_test_ds, marker="x", lw=0, color="lime")
+        #     ax.plot(Xs, fmean, color="blue")
+        #     ax.fill_between(
+        #         Xs[:, 0],
+        #         (fmean[:,0] - 2 * np.sqrt(fvar[:,0])),
+        #         (fmean[:,0] + 2 * np.sqrt(fvar[:,0])),
+        #         lw=2,
+        #         color="blue",
+        #         alpha=0.2,
+        #         label = "$\pm 2\sigma$"
+        #     )
+        # plt.show()
 
 np.savez("toy-example-interpolation", svgp=svgp_mse, scmogp=scmogp_mse)

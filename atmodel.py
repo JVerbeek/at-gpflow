@@ -46,7 +46,6 @@ class ConditionalMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         ) + tf.linalg.diag(tf.squeeze(self.likelihood.target.variance_at(Bx)))
         Kba = tf.transpose(Kab)
 
-        # Cholesky pain starts here
         Laa = tf.linalg.cholesky(Kaa)
         A = tf.linalg.triangular_solve(
             Laa, Ay
@@ -235,10 +234,11 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         diag_Qss = tf.linalg.diag_part(Qaa)
         diag_Kss = tf.linalg.diag_part(Kaa)
         sigma_s = tf.squeeze(self.likelihood.source.variance_at(Ax))
+
         D_s = (diag_Kss - diag_Qss) + sigma_s
 
-        W = Kmm + Kma @ tf.linalg.diag(1.0 / D_s) @ Kam  # [3]
-        Lw = tf.linalg.cholesky(W)  # [3]
+        W = Kmm + Kma @ tf.linalg.diag(1.0 / D_s) @ Kam + tf.eye(inducing_variable.shape[0], dtype=tf.float64) * self.jitter
+        Lw = tf.linalg.cholesky(W) 
 
         u = tf.linalg.diag(1.0 / D_s) @ Ay
         mu_t = tf.transpose(Kmb) @ tf.linalg.cholesky_solve(
@@ -249,14 +249,16 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             Lw, Kmb
         )  # LwLw^T x = Kmb, x = W^1 Kmb
 
+
+
         if not self.exact_target:
-            C_t = BmWmt + tf.linalg.diag(D_t)
-        else:  # Approximate everything.
+            C_t = BmWmt + tf.linalg.diag(D_t) + tf.eye(D_t.shape[0], dtype=tf.float64) * self.jitter
+        else:
             C_t = Kbb - Qbb + BmWmt + tf.linalg.diag(D_t)
 
         delta = By - mu_t
-        L_t = tf.linalg.cholesky(C_t + tf.eye(C_t.shape[0], dtype=tf.float64) * self.jitter)
-        alpha_t = tf.linalg.triangular_solve(L_t, delta)
+        L_t = tf.linalg.cholesky(C_t)
+        alpha_t = tf.linalg.triangular_solve(L_t, delta) 
         n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
         logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
         quad = tf.matmul(alpha_t, alpha_t, transpose_a=True)
@@ -280,18 +282,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
     def maximum_log_likelihood_objective(self):
         return self.conditional_likelihood()
 
-    def predict_f(self, Xnew, full_cov: bool = False, full_output_cov: bool = False):
-        r"""
-        Allegedly, the GP prediction stays the same.
-        This method computes predictions at X \in R^{N \x D} input points
-
-        .. math::
-            p(F* | Y)
-
-        where F* are points on the GP at new data points, Y are noisy observations at training data
-        points.
-        """
-
+    def predict_f(self, Xnew, full_cov=False, **kwargs):
         Xs, Ys = self.data
         Xind = self.inducing_variable.Z
 
@@ -304,91 +295,76 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         err_Bs = err[Bs]
         err_reorder = tf.concat((err_As, err_Bs), axis=0)
 
-        knn = self.kernel(
-            Xnew, full_cov=full_cov
-        )  # + tf.squeeze(self.likelihood.target.variance_at(Xnew))
-
         Ax, Ay = tf.reshape(Xs[:, 0][As], (-1, 1)), tf.reshape(Ys[:, 0][As], (-1, 1))
         Bx, By = tf.reshape(Xs[:, 0][Bs], (-1, 1)), tf.reshape(Ys[:, 0][Bs], (-1, 1))
 
+        inducing_variable = self.inducing_variable.Z
+        M = inducing_variable.shape[0]
+        T = tf.shape(Bx)[0]
 
-        indices_A = tf.reshape(tf.where(As), [-1])
-        indices_B = tf.reshape(tf.where(Bs), [-1])
-
-        # Reorder indices to account for A/B reordering
-        X_ordered = tf.gather(Xs, tf.concat([indices_A, indices_B], axis=0))
-
-        # Compute exact kernel parts
-        Kbb = self.kernel(Xs[Bs])
-        Kaa = self.kernel(Xs[As])
-
-        # Compute inducing points x rest data
-        inducing_variable = self.inducing_variable.Z 
+        Kmm = self.kernel(inducing_variable) + tf.eye(M, dtype=tf.float64) * self.jitter
         Kma = self.kernel(inducing_variable, Xs[As])
         Kmb = self.kernel(inducing_variable, Xs[Bs])
-        Kam = tf.transpose(Kma)
-        Kmm = (
-            self.kernel(inducing_variable)
-            + np.eye(len(Xind.numpy()), dtype=np.float64) * self.jitter
-        )
+        Kaa = self.kernel(Xs[As])
+        Kbb = self.kernel(Xs[Bs])
+
         L_Kmm = tf.linalg.cholesky(Kmm)
-        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma)  # Ax = b, x= A-1b
-        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb)
+        Lmm_inv_kma = tf.linalg.triangular_solve(L_Kmm, Kma) 
+        Lmm_inv_kmb = tf.linalg.triangular_solve(L_Kmm, Kmb) 
 
-        # Use above to compute approximations and diagonal
-        Qaa = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kma)
-        Qab = tf.matmul(tf.transpose(Lmm_inv_kma), Lmm_inv_kmb)
-        Qba = tf.transpose(Qab)
-        Qbb = tf.matmul(tf.transpose(Lmm_inv_kmb), Lmm_inv_kmb)
+        Qaa = tf.matmul(Lmm_inv_kma, Lmm_inv_kma, transpose_a=True) 
+        Qbb = tf.matmul(Lmm_inv_kmb, Lmm_inv_kmb, transpose_a=True)  
+        Qab = tf.matmul(Lmm_inv_kma, Lmm_inv_kmb, transpose_a=True)  
+        Qba = tf.transpose(Qab)                                    
 
-        # Full approximations of the exact matrices, target
-        diag_Qtt = tf.linalg.diag_part(Qbb)
-        diag_Ktt = tf.linalg.diag_part(Kbb)
-        sigma_t = tf.squeeze(self.likelihood.target.variance_at(Bx))
-        D_b = (diag_Ktt - diag_Qtt) + sigma_t
-
-        # Full approximations of the exact matrices, source
-        diag_Qss = tf.linalg.diag_part(Qaa)
-        diag_Kss = tf.linalg.diag_part(Kaa)
         sigma_s = tf.squeeze(self.likelihood.source.variance_at(Ax))
-        D_a = (diag_Kss - diag_Qss) + sigma_s
+        sigma_t = tf.squeeze(self.likelihood.target.variance_at(Bx))
+        diag_D_a = (tf.linalg.diag_part(Kaa) - tf.linalg.diag_part(Qaa)) + sigma_s  
+        diag_D_b = (tf.linalg.diag_part(Kbb) - tf.linalg.diag_part(Qbb)) + sigma_t  
 
-        W = Kmm + Kma @ tf.linalg.diag(1.0 / D_a) @ Kam  # [3]
-        Lw = tf.linalg.cholesky(W)
-
-        BmWmt = tf.transpose(Kmb) @ tf.linalg.cholesky_solve(
-            Lw, Kmb
-        )  # LwLw^T x = Kmb, x = W^1 Kmb
+        D_a_inv = tf.linalg.diag(1.0 / diag_D_a)
 
         # Blockwise inversion of K_fic
-        D_a_inv = tf.linalg.diag(1.0 / D_a)
-        M = tf.linalg.cholesky(Kmm + Kma @ D_a_inv @ Kam)
-        half = tf.linalg.triangular_solve(M, Kma @ D_a_inv)  # m by m, m by a
-        Qaa_inv = D_a_inv - tf.linalg.matmul(half, half, transpose_a=True)
+        W = Kmm + Kma @ D_a_inv @ tf.transpose(Kma)
+        Lw = tf.linalg.cholesky(W) 
+        half = tf.linalg.triangular_solve(Lw, Kma @ D_a_inv)  
+        A_inv = D_a_inv - tf.matmul(half, half, transpose_a=True)  
 
-        C_b = BmWmt + tf.linalg.diag(D_b)
-        D_b_inv = tf.linalg.diag(1.0 / D_b)
-        Qbb_inv = D_b_inv - D_b_inv @ tf.transpose(Kmb) @ tf.linalg.inv(W + Kmb @ D_b_inv @ tf.transpose(Kmb)) @ Kmb @ D_b_inv
+        QbaKaa_inv = Qba @ A_inv                             
+        S = Qbb + tf.linalg.diag(diag_D_b) - QbaKaa_inv @ Qab          
+        S = S + tf.eye(tf.shape(S)[0], dtype=tf.float64) * self.jitter 
+        Ls = tf.linalg.cholesky(S)                                      
 
-        A = Qaa_inv + Qaa_inv @ Qab @ Qbb_inv @ Qba @ Qaa_inv
-        B = -Qaa_inv @ Qab @ Qbb_inv
-        C = -Qbb_inv @ Qba @ Qaa_inv
-        D = Qbb_inv
+        # Added some stable inverses w. choleskies
+        C_block = tf.linalg.cholesky_solve(Ls, tf.eye(tf.shape(S)[0], dtype=tf.float64))    
+        B_block = -tf.linalg.cholesky_solve(Ls, QbaKaa_inv)                        
+        A_block = A_inv + tf.transpose(QbaKaa_inv) @ C_block @ QbaKaa_inv      
+        K_fic_inv = tf.concat([
+            tf.concat([A_block, tf.transpose(B_block)], axis=1),
+            tf.concat([B_block, C_block], axis=1),
+        ], axis=0) 
 
-        K_fic_inv = tf.concat((tf.concat((A, B), 1), tf.concat((C, D), 1)), 0)
 
-        # Construct Kmn
-        Knm = (
-            self.kernel(X_ordered, inducing_variable)
-            @ tf.linalg.inv(Kmm)
-            @ self.kernel(inducing_variable, Xnew)
-        )
-        cond = tf.transpose(Knm) @ K_fic_inv @ Knm
-        f_mean_zero = tf.transpose(Knm) @ K_fic_inv @ err_reorder
-        f_var = tf.expand_dims(tf.linalg.diag_part(knn - cond), 1)
+        # Cross covariances between IVs and new points
+        Kmnew = self.kernel(inducing_variable, Xnew)                               
+        Lmm_inv_kmnew = tf.linalg.triangular_solve(L_Kmm, Kmnew)            
+        Qan = tf.matmul(Lmm_inv_kma,  Lmm_inv_kmnew, transpose_a=True)            
+        Qbn = tf.matmul(Lmm_inv_kmb,  Lmm_inv_kmnew, transpose_a=True)          
+        Qnew = tf.concat([Qan, Qbn], axis=0)                          
 
-        # tf.print("fm0", f_mean_zero.shape)
+        # Mean: Qun (K_fic)^-1 y
+        f_mean_zero = tf.transpose(Qnew) @ K_fic_inv @ err_reorder      
         f_mean = f_mean_zero + self.mean_function(Xnew[:, 0][:, None])
+
+        # Cov: Knn - Qn Kfic^-1 Qn^T + D_n
+        knn = self.kernel(Xnew, full_cov=False)                                 
+        qnn = tf.reduce_sum(Lmm_inv_kmnew ** 2, axis=0)                         
+     
+        KfinvQ = K_fic_inv @ Qnew                                         
+        cond_diag = tf.reduce_sum(Qnew * KfinvQ, axis=0)                      
+
+        f_var = tf.expand_dims(knn - qnn + cond_diag, 1)  # Diagonal correction               
+
         return f_mean, f_var
 
     def expensive_predict_f(
@@ -586,7 +562,7 @@ class SparseCMOGP_QR(gpf.models.GPModel, InternalDataTrainingLossMixin):
             D_s = (diag_Kss - diag_Qss) + sigma_s
 
 
-            W = Kmm + tf.transpose(Rma) @ tf.transpose(Qma) @ tf.linalg.diag(1.0 / D_s) @ Qma @ Rma # [3]
+            W = Kmm + tf.transpose(Rma) @ tf.transpose(Qma) @ tf.linalg.diag(1.0 / D_s) @ Qma @ Rma + tf.eye(Kmm.shape[0], dtype=tf.float64) * self.jitter# [3]
             Lw = tf.linalg.cholesky(W)  # [3]
 
             u = tf.linalg.diag(1.0 / D_s) @ Ay
@@ -603,7 +579,7 @@ class SparseCMOGP_QR(gpf.models.GPModel, InternalDataTrainingLossMixin):
                 C_t = Kbb - Qbb + BmWmt + tf.linalg.diag(D_t)
 
             delta = By - mu_t
-            L_t = tf.linalg.cholesky(C_t)
+            L_t = tf.linalg.cholesky(C_t  + tf.eye(C_t.shape[0], dtype=tf.float64) * self.jitter)
             alpha_t = tf.linalg.triangular_solve(L_t, delta)
             n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
             logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
