@@ -363,7 +363,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         KfinvQ = K_fic_inv @ Qnew                                         
         cond_diag = tf.reduce_sum(Qnew * KfinvQ, axis=0)                      
 
-        f_var = tf.expand_dims(knn - qnn + cond_diag, 1)  # Diagonal correction               
+        f_var = tf.expand_dims(knn - qnn, 1)  # Diagonal correction               
 
         return f_mean, f_var
 

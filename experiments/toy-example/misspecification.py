@@ -138,24 +138,24 @@ for i in range(10):
         print(model2, mse)
         svgp_mse[i, j] = mse
 
-        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
 
-        # for model, ax in zip((model1, model2), (ax1, ax2)):
-        #     fmean, fvar = model.predict_f(np.hstack((Xs, np.ones_like(Xs))))
-        #     ax.plot(Xs, ys, color="red")
-        #     ax.plot(Xt_train_full, yt_train_full, color="orchid")
-        #     ax.plot(Xt_train_ds, yt_train_ds, color="purple")
-        #     ax.plot(Xt_test_ds, yt_test_ds, marker="x", lw=0, color="lime")
-        #     ax.plot(Xs, fmean, color="blue")
-        #     ax.fill_between(
-        #         Xs[:, 0],
-        #         (fmean[:,0] - 2 * np.sqrt(fvar[:,0])),
-        #         (fmean[:,0] + 2 * np.sqrt(fvar[:,0])),
-        #         lw=2,
-        #         color="blue",
-        #         alpha=0.2,
-        #         label = "$\pm 2\sigma$"
-        #     )
-        # plt.show()
+        for model, ax in zip((model1, model2), (ax1, ax2)):
+            fmean, fvar = model.predict_f(np.hstack((Xs, np.ones_like(Xs))))
+            ax.plot(Xs, ys, color="red")
+            ax.plot(Xt_train_full, yt_train_full, color="orchid")
+            ax.plot(Xt_train_ds, yt_train_ds, color="purple")
+            ax.plot(Xt_test_ds, yt_test_ds, marker="x", lw=0, color="lime")
+            ax.plot(Xs, fmean, color="blue")
+            ax.fill_between(
+                Xs[:, 0],
+                (fmean[:,0] - 2 * np.sqrt(fvar[:,0])),
+                (fmean[:,0] + 2 * np.sqrt(fvar[:,0])),
+                lw=2,
+                color="blue",
+                alpha=0.2,
+                label = "$\pm 2\sigma$"
+            )
+        plt.show()
 
 np.savez("toy-example-interpolation", svgp=svgp_mse, scmogp=scmogp_mse)
