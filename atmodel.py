@@ -252,21 +252,35 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
 
         if not self.exact_target:
-            C_t = BmWmt + tf.linalg.diag(D_t) + tf.eye(D_t.shape[0], dtype=tf.float64) * self.jitter
+            C_t = BmWmt + tf.linalg.diag(D_t) 
+            D_t_inv = tf.linalg.diag(1.0 / D_t)
+            delta = By - mu_t
+            middle = W + Kmb @ D_t_inv @ tf.transpose(Kmb)
+            m_chol = tf.linalg.cholesky(middle)
+            middle_inv = tf.linalg.cholesky_solve(m_chol, tf.linalg.eye(m_chol.shape[0], dtype=tf.float64))
+            C_t_inv = D_t_inv - D_t_inv @ tf.transpose(Kmb) @ middle_inv @ Kmb @ D_t_inv
+            n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
+            logdet_t = tf.linalg.logdet(C_t) #2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
+            quad = tf.transpose(delta) @ C_t_inv @ delta
+            lml = -0.5 * (
+                logdet_t
+                + quad
+                + n_target * tf.cast(tf.math.log(2 * tf.constant(np.pi)), Bx.dtype)
+            )
         else:
             C_t = Kbb - Qbb + BmWmt + tf.linalg.diag(D_t)
 
-        delta = By - mu_t
-        L_t = tf.linalg.cholesky(C_t)
-        alpha_t = tf.linalg.triangular_solve(L_t, delta) 
-        n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
-        logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
-        quad = tf.matmul(alpha_t, alpha_t, transpose_a=True)
-        lml = -0.5 * (
-            logdet_t
-            + quad
-            + n_target * tf.cast(tf.math.log(2 * tf.constant(np.pi)), Bx.dtype)
-        )
+            delta = By - mu_t
+            L_t = tf.linalg.cholesky(C_t)
+            alpha_t = tf.linalg.triangular_solve(L_t, delta) 
+            n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
+            logdet_t = 2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
+            quad = tf.matmul(alpha_t, alpha_t, transpose_a=True)
+            lml = -0.5 * (
+                logdet_t
+                + quad
+                + n_target * tf.cast(tf.math.log(2 * tf.constant(np.pi)), Bx.dtype)
+            )
 
         if not decompose_likelihood:
             return tf.squeeze(lml)
