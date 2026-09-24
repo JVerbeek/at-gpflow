@@ -1,0 +1,17 @@
+bash: /home/jverbeek/miniconda3/lib/libtinfo.so.6: no version information available (required by bash)
+python: can't open file '/home/jverbeek/at-gpflow/experiments/density-stress-test/speedtest_script.py': [Errno 2] No such file or directory
+bash: /home/jverbeek/miniconda3/lib/libtinfo.so.6: no version information available (required by bash)
+  File "/home/jverbeek/at-gpflow/experiments/density-stress-test/speedtest-script.py", line 62
+    t_opt = time.time()
+    ^
+SyntaxError: invalid syntax
+bash: /home/jverbeek/miniconda3/lib/libtinfo.so.6: no version information available (required by bash)
+2026-09-24 10:12:59.444333: W tensorflow/compiler/xla/stream_executor/platform/default/dso_loader.cc:64] Could not load dynamic library 'libcudart.so.11.0'; dlerror: libcudart.so.11.0: cannot open shared object file: No such file or directory; LD_LIBRARY_PATH: :/home/jverbeek/miniconda3/lib/
+2026-09-24 10:12:59.444421: I tensorflow/compiler/xla/stream_executor/cuda/cudart_stub.cc:29] Ignore above cudart dlerror if you do not have a GPU set up on your machine.
+2026-09-24 10:13:01.763892: W tensorflow/compiler/xla/stream_executor/platform/default/dso_loader.cc:64] Could not load dynamic library 'libnvinfer.so.7'; dlerror: libnvinfer.so.7: cannot open shared object file: No such file or directory; LD_LIBRARY_PATH: :/home/jverbeek/miniconda3/lib/
+2026-09-24 10:13:01.764525: W tensorflow/compiler/xla/stream_executor/platform/default/dso_loader.cc:64] Could not load dynamic library 'libnvinfer_plugin.so.7'; dlerror: libnvinfer_plugin.so.7: cannot open shared object file: No such file or directory; LD_LIBRARY_PATH: :/home/jverbeek/miniconda3/lib/
+2026-09-24 10:13:01.764547: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Cannot dlopen some TensorRT libraries. If you would like to use Nvidia GPU with TensorRT, please make sure the missing libraries mentioned above are installed properly.
+Traceback (most recent call last):
+  File "/home/jverbeek/at-gpflow/experiments/density-stress-test/speedtest-script.py", line 10, in <module>
+    from atmodel import SparseCMOGP
+ModuleNotFoundError: No module named 'atmodel'

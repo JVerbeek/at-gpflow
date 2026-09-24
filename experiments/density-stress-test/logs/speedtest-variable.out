@@ -1,0 +1,87 @@
+
+
+###############################################################################
+Science Cluster
+Job 11701532 for user 'jverbeek'
+Finished at: Thu Sep 24 10:10:41 CEST 2026
+
+Job details:
+============
+
+Name                : allocation
+User                : jverbeek
+Partition           : 
+Nodes               : cn79
+Cores               : 2
+State               : FAILED
+Submit              : 2026-09-24T10:10:38
+Start               : 2026-09-24T10:10:39
+End                 : 2026-09-24T10:10:41
+Reserved walltime   : --
+Used walltime       : 00:00:02
+Used CPU time       : 00:00:01 (efficiency: 25.22%)
+% User (Computation):  0.00%
+% System (I/O)      : 25.07%
+Mem reserved        : 16?
+Max Mem used        : 48.00K (cn79)
+Max Disk Write      : 0.00  (cn79)
+Max Disk Read       : 0.00  (cn79)
+
+
+
+###############################################################################
+Science Cluster
+Job 11701534 for user 'jverbeek'
+Finished at: Thu Sep 24 10:11:56 CEST 2026
+
+Job details:
+============
+
+Name                : allocation
+User                : jverbeek
+Partition           : 
+Nodes               : cn79
+Cores               : 2
+State               : FAILED
+Submit              : 2026-09-24T10:11:53
+Start               : 2026-09-24T10:11:54
+End                 : 2026-09-24T10:11:56
+Reserved walltime   : --
+Used walltime       : 00:00:02
+Used CPU time       : 00:00:01 (efficiency: 25.07%)
+% User (Computation):  0.00%
+% System (I/O)      : 27.52%
+Mem reserved        : 16?
+Max Mem used        : 44.00K (cn79)
+Max Disk Write      : 0.00  (cn79)
+Max Disk Read       : 0.00  (cn79)
+
+
+
+###############################################################################
+Science Cluster
+Job 11701544 for user 'jverbeek'
+Finished at: Thu Sep 24 10:13:10 CEST 2026
+
+Job details:
+============
+
+Name                : run_experiment.sh
+User                : jverbeek
+Partition           : das
+Nodes               : cn79
+Cores               : 2
+State               : FAILED
+Submit              : 2026-09-24T10:12:54
+Start               : 2026-09-24T10:12:57
+End                 : 2026-09-24T10:13:10
+Reserved walltime   : 12:00:00
+Used walltime       : 00:00:13
+Used CPU time       : 00:00:08 (efficiency: 33.11%)
+% User (Computation): 83.97%
+% System (I/O)      : 16.02%
+Mem reserved        : 10G
+Max Mem used        : 24.00K (cn79)
+Max Disk Write      : 0.00  (cn79)
+Max Disk Read       : 0.00  (cn79)
+
