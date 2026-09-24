@@ -28,22 +28,26 @@ def get_kernel():
 
 scmogp_time = np.zeros((10, 2))  # full, sparse
 svgp_time = np.zeros((10, 2))  # full, sparse
+sgpr_time = np.zeros((10, 2))  # full, sparse
 scmogp_mse = np.zeros((10, 2))  # full, sparse
 svgp_mse = np.zeros((10, 2))  # full, sparse / 0.01, 0.05, 0.1for i in range(10):
+sgpr_mse = np.zeros((10, 2)) 
 for i in range(10): 
     for n, target_proportion in enumerate([0.1]):
         print("*"*20, i, "*"*20)
-        Xs = np.linspace(0, 20, 300).reshape(-1, 1)
-        Xt = np.linspace(0, 20, 300).reshape(-1, 1)
-        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=5, variance=2)(Xs))
-        f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.Matern32(lengthscales=1, variance=1)(Xs))
+        Xs = np.linspace(0, 100, 500).reshape(-1, 1)
+        Xt = np.linspace(0, 100, 500).reshape(-1, 1)
+        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=10, variance=1)(Xs))
+        f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=2, variance=1)(Xs))
 
         test_size = int(int(len(Xt)) * 0.2)
-        test_indices = np.random.randint(0, len(Xt), test_size)
+        start = int(0.45*len(Xt))
+        print(start, start+test_size)
+        test_indices = np.arange(start, start + test_size, 1)
         train_indices = [x for x in np.arange(len(Xt)) if x not in test_indices]
         
         ys = (f1 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
-        yt = (f1 + f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
+        yt = (-f1 + -0.4*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
         yt_train_full = yt[train_indices]
         Xt_train_full = Xt[train_indices]
         yt_test_full = yt[test_indices]
@@ -56,7 +60,9 @@ for i in range(10):
         Xt_ds = np.array([x for i, x in enumerate(Xt) if i % int(1/target_proportion) == 0])
 
         test_size = int(int(len(Xt_ds)) * 0.2)
-        test_indices = np.random.randint(0, len(Xt_ds), test_size)
+        start = int(0.45*len(Xt_ds))
+        print(start, start+test_size)
+        test_indices = np.arange(start, start + test_size, 1)
         train_indices = [x for x in np.arange(len(Xt_ds)) if x not in test_indices]
         yt_train_ds = yt_ds[train_indices] 
         Xt_train_ds = Xt_ds[train_indices]
@@ -132,23 +138,47 @@ for i in range(10):
             t = time.time()
             optimize(model1)
             dt_scmogp = time.time() - t
-            fig, (ax1, ax2) = plt.subplots(1, 2) 
-            for model, ax in zip((model1, model2), (ax1, ax2)):
+
+
+            if j == 0:
+                model3 = gpf.models.SGPR((Xt_train_full[:,0][:,None], yt_train_full[:,0][:,None]), kernel=gpf.kernels.Matern32(), inducing_variable=ivs[:,0][:,None])
+            else:
+                model3 = gpf.models.SGPR((Xt_train_ds[:,0][:,None], yt_train_ds[:,0][:,None]), kernel=gpf.kernels.Matern32(), inducing_variable=ivs[:,0][:,None])
+
+            t = time.time()
+            optimize(model3)
+            dt_sgpr = time.time() - t
+            
+            plt.rcParams["font.family"] = "serif"
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 8))
+
+            for n, (model, ax) in enumerate(zip((model1, model2), (ax1, ax2))):
                 fmean, fvar = model.predict_f(np.hstack((Xs, np.ones_like(Xs))))
-                ax.plot(Xs, ys, color="red")
-                ax.plot(Xt_train_full, yt_train_full, color="orchid")
-                ax.plot(Xt_train_ds, yt_train_ds, color="purple")
-                ax.plot(Xt_test_ds, yt_test_ds, marker="x", lw=0, color="lime")
-                ax.plot(Xs, fmean, color="blue")
+                ax.plot(Xs, ys, color="C0", label="source")
+                if j == 1:
+                    ax.plot(Xt_train_ds, yt_train_ds, color="C1", label="train target")
+                else:
+                    ax.plot(Xt_train_full, yt_train_full, color="C1", label="train target")
+                ax.plot(Xt_test_ds, yt_test_ds, marker="o", lw=0, color="black", label="test target")
+                ax.plot(Xs, fmean, color="black", label="predicted f (target)")
                 ax.fill_between(
                     Xs[:, 0],
                     (fmean[:,0] - 2 * np.sqrt(fvar[:,0])),
                     (fmean[:,0] + 2 * np.sqrt(fvar[:,0])),
                     lw=2,
-                    color="blue",
+                    color="black",
                     alpha=0.2,
                     label = "$\pm 2\sigma$"
                 )
+                ax.tick_params(axis="both", labelsize=15)
+                ax.set_title("sCMOGP" if n == 0 else "SVGP", fontsize=25)
+                ax.set_xlabel("x", fontsize=20)
+                ax.set_ylabel("y", fontsize=20)
+            plt.legend(fontsize=15)
+
+            mode = "dense" if j == 0 else "sparse"
+            plt.suptitle(f"fit with {mode} target data", fontsize=30)
+            plt.savefig(f"experiments/toy-example/figures/dataset-{i}-{mode}")
             plt.show()
 
             fmean_test, fvar_test = model1.predict_f(np.hstack((Xtest, np.ones_like(Xtest))))
@@ -156,10 +186,17 @@ for i in range(10):
             scmogp_time[i, j] = dt_scmogp
             scmogp_mse[i, j] = mse
             print(model1, mse, "fit in", dt_scmogp)
+
             fmean_test, fvar_test = model2.predict_f(np.hstack((Xtest, np.ones_like(Xtest))))
             mse = mean_squared_error(ytest, fmean_test[:,0])
             print(model2, mse, "fit in", dt_svgp)
             svgp_time[i, j] = dt_svgp
             svgp_mse[i, j] = mse
+
+            fmean_test, fvar_test = model3.predict_f(Xtest)
+            mse = mean_squared_error(ytest, fmean_test[:,0])
+            print(model3, mse, "fit in", dt_sgpr)
+            sgpr_time[i, j] = dt_sgpr
+            sgpr_mse[i, j] = mse
 
 np.savez(f"toy-example-interpolation-{target_proportion}", svgp=svgp_mse, scmogp=scmogp_mse, scmogp_time=dt_scmogp, svgp_time=dt_svgp)
