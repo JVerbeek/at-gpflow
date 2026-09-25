@@ -123,6 +123,7 @@ coreg = gpf.kernels.Coregion(
 ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
 iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
 iv_ind = np.concatenate(iv_ind)  # I guess the IPs for the target don't matter here, but this makes the comparison fair.
+shuffle = np.random.permutation(np.arange(len(ivs)))
 ivs = ivs[shuffle]
 ivs = np.hstack((ivs, iv_ind))
 
@@ -148,29 +149,23 @@ gpf.utilities.print_summary(model3)
 k = gpf.kernels.Matern32(active_dims=[0])
 
 # Coregion kernel
-coreg = gpf.kernels.Coregion(
-    output_dim=output_dim, rank=rank, active_dims=[1]
-)
 
 ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
 iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
 iv_ind = np.concatenate(iv_ind)  # I guess the IPs for the target don't matter here, but this makes the comparison fair.
 ivs = ivs[shuffle]
-ivs = np.hstack((ivs, iv_ind))
+ivs = ivs
 
 l1 = gpf.likelihoods.Gaussian()
-l2 = gpf.likelihoods.Gaussian()
-lik = gpf.likelihoods.SwitchedLikelihood(
-    [l1 if i != condition_index else l2 for i in range(output_dim)]
-)
+
 # now build the GP model as normal
-model4 =  gpf.models.SGPR((X, y), kernel=kern, likelihood=l1, inducing_variable=LMCInducingPointsBase(ivs))
+model4 =  gpf.models.SGPR((X[X[:,0] == condition_index][:,0].reshape(-1, 1), y[X[:,0] == condition_index][:,0].reshape(-1, 1)), kernel=k, likelihood=l1, inducing_variable=ivs)
 
 
 gpf.utilities.print_summary(model4)
 # fit the covariance function parameters
 gpf.optimizers.Scipy().minimize(
-    model4.training_loss_closure((X, y)),
+    model4.training_loss,
     model4.trainable_variables,
     method="L-BFGS-B",
 )
@@ -184,14 +179,15 @@ Xtst = Xtest.reshape(-1, 1)
 
 for name, model in zip(["sCMOGP", "SVGP", "SGPR"], [model2, model3, model4]):
     for index in range(output_dim):
+        Xplot = np.linspace(lo, hi, 300)[:,None] if name is "SGPR" else np.hstack((np.linspace(lo, hi, 300)[:, None], index * np.ones((300, 1))))
         Ax, Ay = X[X[:, 1] == index], data_Y[index]
-        Xplot = np.hstack((np.linspace(lo, hi, 300)[:, None], index * np.ones((300, 1))))
         fmean, fvar = model.predict_f(Xplot)
         fmean = fmean * stds[index] + means[index]  # back to inches
         fvar = fvar * stds[index] ** 2
         plt.figure(figsize=(12, 3))
         if index == condition_index:
-            fmean_test, fvar_test = model.predict_f(np.hstack((Xtst, index * np.ones((len(Xtst), 1)))))
+            Xtst_f = Xtst if name == "SGPR" else np.hstack((Xtst, index * np.ones((len(Xtst), 1))))
+            fmean_test, fvar_test = model.predict_f(Xtst_f)
             fmean_test = fmean_test * stds[index] + means[index]
             plt.plot(Xtst, ytest, "r.", ms=12, label="target, held out")
         label = str(d["source_labels"][index]) if index < n_src else str(d["target_label"])

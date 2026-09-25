@@ -46,8 +46,8 @@ for i in range(10):
         test_indices = np.arange(start, start + test_size, 1)
         train_indices = [x for x in np.arange(len(Xt)) if x not in test_indices]
         
-        ys = (f1 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
-        yt = (-f1 + -1*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
+        ys = (0.2*f1 + 0.8*f2 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
+        yt = (0.8*f1 + 0.2*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
         yt_train_full = yt[train_indices]
         Xt_train_full = Xt[train_indices]
         yt_test_full = yt[test_indices]
@@ -92,7 +92,7 @@ for i in range(10):
                 source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()
             )
 
-            nIVS = 30 * output_dim
+            nIVS = 20 * output_dim
             ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
             iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
             iv_ind = np.concatenate(iv_ind) 
@@ -199,4 +199,4 @@ for i in range(10):
             sgpr_time[i, j] = dt_sgpr
             sgpr_mse[i, j] = mse
 
-np.savez(f"toy-example-interpolation-{target_proportion}", svgp=svgp_mse, scmogp=scmogp_mse, scmogp_time=dt_scmogp, svgp_time=dt_svgp)
+np.savez(f"toy-example-interpolation-{target_proportion}", svgp=svgp_mse, scmogp=scmogp_mse, sgpr=sgpr_mse, scmogp_time=dt_scmogp, svgp_time=dt_svgp, sgpr_time=dt_sgpr)

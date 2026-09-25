@@ -247,7 +247,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
         BmWmt = tf.transpose(Kmb) @ tf.linalg.cholesky_solve(
             Lw, Kmb
-        )  # LwLw^T x = Kmb, x = W^1 Kmb
+        )  # LwLw^T x = Kmb, x = W^1 Kbm, res: Kmb W^-1 Kbm
 
 
 
@@ -262,7 +262,11 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             b = tf.linalg.triangular_solve(m_chol, Kmb @ a)  
             quad = tf.matmul(delta, a, transpose_a=True) - tf.matmul(b, b, transpose_a=True)
             n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
-            logdet_t = tf.linalg.logdet(C_t) #2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
+            Lw_inv_Kmb = tf.linalg.triangular_solve(Lw, Kmb)  # O(m^2 * n_b)
+            inner = tf.eye(Lw_inv_Kmb.shape[0], dtype=tf.float64) + Lw_inv_Kmb @ tf.linalg.diag(1.0 / D_t) @ tf.transpose(Lw_inv_Kmb)
+            L_inner = tf.linalg.cholesky(inner)  
+            logdet_inner = tf.linalg.logdet(inner)
+            logdet_t = tf.reduce_sum(tf.math.log(D_t)) + logdet_inner #2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
             lml = -0.5 * (
                 logdet_t
                 + quad
@@ -299,16 +303,13 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
 
     def predict_f(self, Xnew, full_cov=False, **kwargs):
         Xs, Ys = self.data
-        Xind = self.inducing_variable.Z
 
         err = (Ys - self.mean_function(Xs))[:, 0][:, None]
 
         As = Ys[:, 1] != self.conditioning_index
         Bs = Ys[:, 1] == self.conditioning_index
 
-        err_As = err[As]
-        err_Bs = err[Bs]
-        err_reorder = tf.concat((err_As, err_Bs), axis=0)
+        err_reorder = tf.concat((err[As], err[Bs]), axis=0)
 
         Ax, Ay = tf.reshape(Xs[:, 0][As], (-1, 1)), tf.reshape(Ys[:, 0][As], (-1, 1))
         Bx, By = tf.reshape(Xs[:, 0][Bs], (-1, 1)), tf.reshape(Ys[:, 0][Bs], (-1, 1))
@@ -365,22 +366,23 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             tf.concat([B_block, C_block], axis=1),
         ], axis=0) 
 
-        # Cross covariances between IVs and new points
+
         Kmnew = self.kernel(inducing_variable, Xnew)                               
         Lmm_inv_kmnew = tf.linalg.triangular_solve(L_Kmm, Kmnew)            
         Qan = tf.matmul(Lmm_inv_kma,  Lmm_inv_kmnew, transpose_a=True)            
         Qbn = tf.matmul(Lmm_inv_kmb,  Lmm_inv_kmnew, transpose_a=True)          
-        Qnew = tf.concat([Qan, Qbn], axis=0)                          
+        Kfn = tf.concat([Qan, Qbn], axis=0)                          
 
         # Mean: Qun (K_fic)^-1 y
-        f_mean_zero = tf.transpose(Qnew) @ K_fic_inv @ err_reorder      
+        c = tf.transpose(Kfn) @ K_fic_inv 
+        f_mean_zero = c @ err_reorder      
         f_mean = f_mean_zero + self.mean_function(Xnew[:, 0][:, None])
 
         # Cov: Knn - Qn Kfic^-1 Qn^T + D_n
         knn = self.kernel(Xnew, full_cov=False)                                 
-        qnn = tf.reduce_sum(Lmm_inv_kmnew ** 2, axis=0)                         
-     
-        f_var = tf.expand_dims(knn - qnn, 1)  # Diagonal correction               
+        qnn = tf.reduce_sum(Lmm_inv_kmnew ** 2, axis=0)     
+
+        f_var = tf.expand_dims(knn - qnn , 1)  # Diagonal correction               
 
         return f_mean, f_var
 
@@ -477,6 +479,6 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         qnn = tf.reduce_sum(Lmm_inv_kmnew ** 2, axis=0)                         
      
 
-        f_var = tf.expand_dims(knn - qnn + cond_diag, 1)  # Diagonal correction               
+        f_var = tf.expand_dims(knn - qnn, 1)  # Diagonal correction               
 
         return f_mean, f_var
