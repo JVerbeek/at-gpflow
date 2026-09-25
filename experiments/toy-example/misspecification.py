@@ -13,7 +13,7 @@ from gpflow.models.training_mixins import InternalDataTrainingLossMixin
 import matplotlib.pyplot as plt
 import time
 
-from atmodel import ConditionalMOGP, SparseCMOGP, SparseCMOGP_QR
+from atmodel import ConditionalMOGP, SparseCMOGP
 from atlikelihood import TransferLikelihood
 
 def optimize(m):
@@ -35,19 +35,19 @@ sgpr_mse = np.zeros((10, 2))
 for i in range(10): 
     for n, target_proportion in enumerate([0.1]):
         print("*"*20, i, "*"*20)
-        Xs = np.linspace(0, 100, 500).reshape(-1, 1)
-        Xt = np.linspace(0, 100, 500).reshape(-1, 1)
-        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=10, variance=1)(Xs))
+        Xs = np.linspace(0, 50, 1000).reshape(-1, 1)
+        Xt = np.linspace(0, 50, 1000).reshape(-1, 1)
+        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=8, variance=1)(Xs))
         f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=2, variance=1)(Xs))
 
-        test_size = int(int(len(Xt)) * 0.2)
+        test_size = int(int(len(Xt)) * 0.25)
         start = int(0.45*len(Xt))
         print(start, start+test_size)
         test_indices = np.arange(start, start + test_size, 1)
         train_indices = [x for x in np.arange(len(Xt)) if x not in test_indices]
         
         ys = (f1 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
-        yt = (-f1 + -0.4*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
+        yt = (-f1 + -1*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
         yt_train_full = yt[train_indices]
         Xt_train_full = Xt[train_indices]
         yt_test_full = yt[test_indices]
@@ -59,7 +59,7 @@ for i in range(10):
         yt_ds = np.array([y for i, y in enumerate(yt) if i % int(1/target_proportion) == 0])
         Xt_ds = np.array([x for i, x in enumerate(Xt) if i % int(1/target_proportion) == 0])
 
-        test_size = int(int(len(Xt_ds)) * 0.2)
+        test_size = int(int(len(Xt_ds)) * 0.25)
         start = int(0.45*len(Xt_ds))
         print(start, start+test_size)
         test_indices = np.arange(start, start + test_size, 1)
@@ -92,7 +92,7 @@ for i in range(10):
                 source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()
             )
 
-            nIVS = 25 * output_dim
+            nIVS = 30 * output_dim
             ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
             iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
             iv_ind = np.concatenate(iv_ind) 
