@@ -196,15 +196,6 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
         Ax, Ay = tf.reshape(Xs[:, 0][As], (-1, 1)), tf.reshape(Ys[:, 0][As], (-1, 1))
         Bx, By = tf.reshape(Xs[:, 0][Bs], (-1, 1)), tf.reshape(Ys[:, 0][Bs], (-1, 1))
 
-
-        # Exact matrices
-        Kbb = self.kernel(Xs[Bs])
-        Kaa = self.kernel(Xs[As])
-
-        # Approximate matrices
-        # inducing_variable = tf.concat(
-        #     (self.inducing_variable.Z, self.inducing_indices), -1
-        # )
         inducing_variable = self.inducing_variable.Z
         Kmm = self.kernel(
             inducing_variable
@@ -222,25 +213,22 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             L_Kmm, Kmb
         )  # L_Kmm x = Kmb, x = L_Kmm^-1 Kmb
 
-        Qbb = tf.matmul(Lmm_inv_kmb, Lmm_inv_kmb, transpose_a=True)
-        Qaa = tf.matmul(Lmm_inv_kma, Lmm_inv_kma, transpose_a=True)
-
         # Full approximations of the exact matrices
-        diag_Qtt = tf.linalg.diag_part(Qbb)
-        diag_Ktt = tf.linalg.diag_part(Kbb)
+        diag_Qtt = tf.reduce_sum(Lmm_inv_kmb ** 2, axis=0) 
+        diag_Kall = self.kernel.K_diag(Xs[:,1][:,None])
+        diag_Kss = diag_Kall[As]
+        diag_Ktt = diag_Kall[Bs]
         sigma_t = tf.squeeze(self.likelihood.target.variance_at(Bx))
         D_t = (diag_Ktt - diag_Qtt) + sigma_t
 
-        diag_Qss = tf.linalg.diag_part(Qaa)
-        diag_Kss = tf.linalg.diag_part(Kaa)
+        diag_Qss = tf.reduce_sum(Lmm_inv_kma ** 2, axis=0)
         sigma_s = tf.squeeze(self.likelihood.source.variance_at(Ax))
 
         D_s = (diag_Kss - diag_Qss) + sigma_s
-
-        W = Kmm + Kma @ tf.linalg.diag(1.0 / D_s) @ Kam + tf.eye(inducing_variable.shape[0], dtype=tf.float64) * self.jitter
+        W = Kmm + (Kma * (1.0/D_s)[None,:]) @ Kam + tf.eye(inducing_variable.shape[0], dtype=tf.float64) * self.jitter
         Lw = tf.linalg.cholesky(W) 
 
-        u = tf.linalg.diag(1.0 / D_s) @ Ay
+        u = Ay / D_s[:,None]
         mu_t = tf.transpose(Kmb) @ tf.linalg.cholesky_solve(
             Lw, Kma @ u
         )  # Kbm W^1 Kma Ds^-1 Ay
@@ -249,22 +237,18 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
             Lw, Kmb
         )  # LwLw^T x = Kmb, x = W^1 Kbm, res: Kmb W^-1 Kbm
 
-
-
         if not self.exact_target:
             C_t = BmWmt + tf.linalg.diag(D_t) 
-            D_t_inv = tf.linalg.diag(1.0 / D_t)
             delta = By - mu_t
-            middle = W + Kmb @ D_t_inv @ tf.transpose(Kmb)
+            middle = W + (Kmb * (1.0 /D_t)[None,:]) @ tf.transpose(Kmb)
             m_chol = tf.linalg.cholesky(middle)
             #middle_inv = tf.linalg.cholesky_solve(m_chol, tf.linalg.eye(m_chol.shape[0], dtype=tf.float64))
-            a = D_t_inv @ delta # D_t_inv u 
+            a = delta /D_t[:,None] # D_t_inv u 
             b = tf.linalg.triangular_solve(m_chol, Kmb @ a)  
             quad = tf.matmul(delta, a, transpose_a=True) - tf.matmul(b, b, transpose_a=True)
             n_target = tf.cast(tf.shape(Bx)[0], Bx.dtype)
             Lw_inv_Kmb = tf.linalg.triangular_solve(Lw, Kmb)  # O(m^2 * n_b)
-            inner = tf.eye(Lw_inv_Kmb.shape[0], dtype=tf.float64) + Lw_inv_Kmb @ tf.linalg.diag(1.0 / D_t) @ tf.transpose(Lw_inv_Kmb)
-            L_inner = tf.linalg.cholesky(inner)  
+            inner = tf.eye(Lw_inv_Kmb.shape[0], dtype=tf.float64) + (Lw_inv_Kmb * (1.0/ D_t[None,:])) @ tf.transpose(Lw_inv_Kmb)
             logdet_inner = tf.linalg.logdet(inner)
             logdet_t = tf.reduce_sum(tf.math.log(D_t)) + logdet_inner #2.0 * tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L_t)))
             lml = -0.5 * (
@@ -273,8 +257,9 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
                 + n_target * tf.cast(tf.math.log(2 * tf.constant(np.pi)), Bx.dtype)
             )
         else:
+            Kbb = self.kernel(Xs[Bs])
+            Qbb = tf.matmul(Lmm_inv_kmb, Lmm_inv_kmb, transpose_a=True)
             C_t = Kbb - Qbb + BmWmt + tf.linalg.diag(D_t)
-
             delta = By - mu_t
             L_t = tf.linalg.cholesky(C_t)
             alpha_t = tf.linalg.triangular_solve(L_t, delta) 
@@ -287,16 +272,7 @@ class SparseCMOGP(gpf.models.GPModel, InternalDataTrainingLossMixin):
                 + n_target * tf.cast(tf.math.log(2 * tf.constant(np.pi)), Bx.dtype)
             )
 
-        if not decompose_likelihood:
-            return tf.squeeze(lml)
-        else:
-            return (
-                logdet_t.numpy().flatten(),
-                quad.numpy().flatten(),
-                (n_source * tf.cast(tf.math.log(2 * tf.constant(np.pi)), Ax.dtype))
-                .numpy()
-                .flatten(),
-            )
+        return tf.squeeze(lml)
 
     def maximum_log_likelihood_objective(self):
         return self.conditional_likelihood()

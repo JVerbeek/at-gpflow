@@ -18,7 +18,7 @@ from atlikelihood import TransferLikelihood
 
 def optimize(m):
     opt = gpf.optimizers.Scipy()
-    res = opt.minimize(m.training_loss, m.trainable_variables, track_loss_history=True, options={"disp": 50}, method="L-BFGS-B")
+    res = opt.minimize(m.training_loss, m.trainable_variables, track_loss_history=True, options={"maxiter":50}, method="L-BFGS-B")
     # plt.plot(res["loss_history"])
     # plt.show()
 
@@ -33,13 +33,14 @@ scmogp_mse = np.zeros((10, 2))  # full, sparse
 svgp_mse = np.zeros((10, 2))  # full, sparse / 0.01, 0.05, 0.1for i in range(10):
 sgpr_mse = np.zeros((10, 2)) 
 for i in range(10): 
-    for n, target_proportion in enumerate([0.1]):
+    for n, target_proportion in enumerate([0.5]):
         print("*"*20, i, "*"*20)
-        Xs = np.linspace(0, 50, 1000).reshape(-1, 1)
-        Xt = np.linspace(0, 50, 1000).reshape(-1, 1)
-        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=8, variance=1)(Xs))
-        f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=2, variance=1)(Xs))
-
+        Xs = np.linspace(0, 50, 10000).reshape(-1, 1)
+        Xt = np.linspace(0, 50, 10000).reshape(-1, 1)
+        #f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=8, variance=1)(Xs))
+        #f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=2, variance=1)(Xs))
+        f1 = np.sin(Xs.flatten())
+        f2 = np.sin(0.2*Xs.flatten())
         test_size = int(int(len(Xt)) * 0.25)
         start = int(0.45*len(Xt))
         print(start, start+test_size)
@@ -52,6 +53,7 @@ for i in range(10):
         Xt_train_full = Xt[train_indices]
         yt_test_full = yt[test_indices]
         Xt_test_full = Xt[test_indices]
+        print(ys.shape, yt.shape)
 
         X_full = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt_train_full, np.ones_like(Xt_train_full)))))
         y_full = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt_train_full, np.ones_like(yt_train_full)))))
@@ -71,7 +73,6 @@ for i in range(10):
 
         X_ds = np.vstack((np.hstack((Xs, np.zeros_like(Xs))), np.hstack((Xt_train_ds, np.ones_like(Xt_train_ds)))))
         y_ds = np.vstack((np.hstack((ys, np.zeros_like(ys))), np.hstack((yt_train_ds, np.ones_like(yt_train_ds)))))
-
 
         for j, (X, y, Xtest, ytest) in enumerate([(X_full, y_full, Xt_test_full, yt_test_full), (X_ds, y_ds, Xt_test_ds, yt_test_ds)]):
             output_dim = 2  # Number of outputs
@@ -114,15 +115,18 @@ for i in range(10):
                 model2.training_loss_closure((X, y)),
                 model2.trainable_variables,
                 method="L-BFGS-B",
+                options={"maxiter":50}
             )
             dt_svgp = time.time() - t
+
+            print("SVGP took", dt_svgp)
 
             # base kernel
             k = get_kernel() 
 
             # coregion kernel
             coreg = gpf.kernels.Coregion(
-                output_dim=output_dim, rank=rank, active_dims=[1]
+                output_dim=output_dim, rank=rank, active_dims=[1] 
             )
 
             kern = k * coreg 
@@ -138,7 +142,6 @@ for i in range(10):
             t = time.time()
             optimize(model1)
             dt_scmogp = time.time() - t
-
 
             if j == 0:
                 model3 = gpf.models.SGPR((Xt_train_full[:,0][:,None], yt_train_full[:,0][:,None]), kernel=gpf.kernels.Matern32(), inducing_variable=ivs[:,0][:,None])
@@ -179,7 +182,6 @@ for i in range(10):
             mode = "dense" if j == 0 else "sparse"
             plt.suptitle(f"fit with {mode} target data", fontsize=30)
             plt.savefig(f"experiments/toy-example/figures/dataset-{i}-{mode}")
-            plt.show()
 
             fmean_test, fvar_test = model1.predict_f(np.hstack((Xtest, np.ones_like(Xtest))))
             mse = mean_squared_error(ytest, fmean_test[:,0])

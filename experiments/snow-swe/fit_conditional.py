@@ -25,7 +25,7 @@ from robust_svgp import LMCInducingPointsBase
 
 # ----------------------------------------------------------------------------- data
 d = np.load(Path(__file__).parent / "data" / "nearby.npz")
-HOLDOUT = int(sys.argv[1]) if len(sys.argv) > 1 else 2019
+HOLDOUT = int(sys.argv[1]) if len(sys.argv) > 1 else 2013
 WINTERS = range(2011, 2021)
 
 
@@ -113,7 +113,7 @@ gpf.utilities.print_summary(model2)
 
 # ----------------------------------------------------------------------------- model: sparse conditional
 # Base kernel
-k = gpf.kernels.Matern32(active_dims=[0])
+k = gpf.kernels.Matern32(active_dims=[0], lengthscales=0.1)
 
 # Coregion kernel
 coreg = gpf.kernels.Coregion(
@@ -127,6 +127,7 @@ shuffle = np.random.permutation(np.arange(len(ivs)))
 ivs = ivs[shuffle]
 ivs = np.hstack((ivs, iv_ind))
 
+kern = k * coreg
 l1 = gpf.likelihoods.Gaussian()
 l2 = gpf.likelihoods.Gaussian()
 lik = gpf.likelihoods.SwitchedLikelihood(
@@ -146,7 +147,7 @@ gpf.optimizers.Scipy().minimize(
 gpf.utilities.print_summary(model3)
 # ----------------------------------------------------------------------------- model: sgpr
 # Base kernel
-k = gpf.kernels.Matern32(active_dims=[0])
+k = gpf.kernels.Matern32(active_dims=[0], lengthscales=0.1)
 
 # Coregion kernel
 
@@ -177,23 +178,30 @@ colors = color_sequences["Set2"]
 lo, hi = HOLDOUT - 1 + 10 / 12, HOLDOUT + 6 / 12  # plot the held-out winter only
 Xtst = Xtest.reshape(-1, 1)
 
-for name, model in zip(["sCMOGP", "SVGP", "SGPR"], [model2, model3, model4]):
-    for index in range(output_dim):
+for index in range(output_dim):
+    plt.figure(figsize=(12, 3))
+    plt.rcParams["font.family"] = "serif"
+    for name, model, color in zip(["sCMOGP", "SVGP", "SGPR"], [model2, model3, model4], colors[:3]):
         Xplot = np.linspace(lo, hi, 300)[:,None] if name is "SGPR" else np.hstack((np.linspace(lo, hi, 300)[:, None], index * np.ones((300, 1))))
         Ax, Ay = X[X[:, 1] == index], data_Y[index]
         fmean, fvar = model.predict_f(Xplot)
         fmean = fmean * stds[index] + means[index]  # back to inches
         fvar = fvar * stds[index] ** 2
-        plt.figure(figsize=(12, 3))
+
         if index == condition_index:
             Xtst_f = Xtst if name == "SGPR" else np.hstack((Xtst, index * np.ones((len(Xtst), 1))))
             fmean_test, fvar_test = model.predict_f(Xtst_f)
             fmean_test = fmean_test * stds[index] + means[index]
             plt.plot(Xtst, ytest, "r.", ms=12, label="target, held out")
+            ours_mse = mean_squared_error(ytest, fmean_test)
+            print(f"{name} held-out readings:", ytest[:, 0].round(1))
+            print(f"{name} predicted:        ", fmean_test.numpy()[:, 0].round(1))
+            print(f"{name} rmse:", np.sqrt(ours_mse).round(2), "in")
+
         label = str(d["source_labels"][index]) if index < n_src else str(d["target_label"])
-        plt.plot(Xplot[:, 0], fmean, color=colors[index], label=f"{label} predictions")
+        plt.plot(Xplot[:, 0], fmean, color=color, label=f"{label} predictions")
         m = (Ax[:, 0] >= lo) & (Ax[:, 0] <= hi)
-        plt.plot(Ax[m, 0], Ay[m, 0], color=colors[index], marker=".", alpha=0.5,
+        plt.plot(Ax[m, 0], Ay[m, 0], color="black", marker=".", alpha=0.5,
                 lw=0 if index == condition_index else 1, label=label)
         plt.fill_between(
             Xplot[:, 0],
@@ -203,10 +211,7 @@ for name, model in zip(["sCMOGP", "SVGP", "SGPR"], [model2, model3, model4]):
             alpha=0.4,
         )
         plt.xlim(lo, hi); plt.ylabel("SWE [in]"); plt.legend(fontsize=8, loc="upper left")
-        plt.savefig(Path(__file__).parent / "figures" / f"fit_conditional_{HOLDOUT}_output{index}_{name}.png", dpi=120)
+        #plt.savefig(Path(__file__).parent / "figures" / f"fit_conditional_{HOLDOUT}_output{index}_{name}.png", dpi=120)
     plt.show()
 
-    ours_mse = mean_squared_error(ytest, fmean_test)
-    print(f"{name} held-out readings:", ytest[:, 0].round(1))
-    print(f"{name} predicted:        ", fmean_test.numpy()[:, 0].round(1))
-    print(f"{name} rmse:", np.sqrt(ours_mse).round(2), "in")
+
