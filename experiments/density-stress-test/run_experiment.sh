@@ -6,8 +6,8 @@
 #SBATCH --mem=10G
 #SBATCH --cpus-per-task=2
 #SBATCH --time=12:00:00
-#SBATCH --output=logs/speedtest-variable.out
-#SBATCH --error=logs/speedtest-variable.err
+#SBATCH --output=logs/speedtest-variable-%j.out
+#SBATCH --error=logs/speedtest-variable-%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 # hyperparameters
@@ -15,5 +15,5 @@
 
 conda activate gp
 
-python speedtest-script.py
+python speedtest-script.py $1
 
