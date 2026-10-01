@@ -16,9 +16,32 @@ import time
 from atmodel import ConditionalMOGP, SparseCMOGP
 from atlikelihood import TransferLikelihood
 
+def expected_nce(y_true, y_pred, y_var, n_bins=10):
+    bins = np.linspace(min(y_pred), max(y_pred), n_bins + 1)
+    bin_indices = np.digitize(y_pred, bins) - 1
+    
+    rmse_per_bin = []
+    rmv_per_bin = []
+    
+    for i in range(n_bins):
+        bin_mask = (bin_indices == i)
+        
+        if np.any(bin_mask):
+            rmse = np.sqrt(np.mean((y_true[bin_mask] - y_pred[bin_mask]) ** 2))
+            rmse_per_bin.append(rmse)
+            
+            rmv = np.sqrt(np.mean(y_var[bin_mask]))
+            rmv_per_bin.append(rmv)
+        else:
+            rmse_per_bin.append(0)
+            rmv_per_bin.append(1)
+    
+    nce = (np.array(rmse_per_bin) - np.array(rmv_per_bin)) / np.array(rmv_per_bin)
+    return nce
+
 def optimize(m):
     opt = gpf.optimizers.Scipy()
-    res = opt.minimize(m.training_loss, m.trainable_variables, track_loss_history=True, options={"maxiter":50}, method="L-BFGS-B")
+    res = opt.minimize(m.training_loss, m.trainable_variables, track_loss_history=True, method="L-BFGS-B")
     # plt.plot(res["loss_history"])
     # plt.show()
 
@@ -29,26 +52,28 @@ def get_kernel():
 scmogp_time = np.zeros((10, 2))  # full, sparse
 svgp_time = np.zeros((10, 2))  # full, sparse
 sgpr_time = np.zeros((10, 2))  # full, sparse
+gpfitc_time = np.zeros((10, 2))  # full, sparse
+
 scmogp_mse = np.zeros((10, 2))  # full, sparse
 svgp_mse = np.zeros((10, 2))  # full, sparse / 0.01, 0.05, 0.1for i in range(10):
 sgpr_mse = np.zeros((10, 2)) 
+gpfitc_mse = np.zeros((10, 2)) 
 for i in range(10): 
-    for n, target_proportion in enumerate([0.5]):
+    for n, target_proportion in enumerate([0.2]):
         print("*"*20, i, "*"*20)
-        Xs = np.linspace(0, 50, 10000).reshape(-1, 1)
-        Xt = np.linspace(0, 50, 10000).reshape(-1, 1)
-        #f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=8, variance=1)(Xs))
-        #f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=2, variance=1)(Xs))
-        f1 = np.sin(Xs.flatten())
-        f2 = np.sin(0.2*Xs.flatten())
-        test_size = int(int(len(Xt)) * 0.25)
+        Xs = np.linspace(0, 50, 1000).reshape(-1, 1)
+        Xt = np.linspace(0, 50, 1000).reshape(-1, 1)
+        fs = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=8, variance=1)(Xs))
+        f1 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=5, variance=1)(Xs))
+        f2 = np.random.multivariate_normal(np.zeros_like(Xs.flatten()), gpf.kernels.RBF(lengthscales=1, variance=1)(Xs))
+        test_size = int(int(len(Xt)) * 0.2)
         start = int(0.45*len(Xt))
         print(start, start+test_size)
         test_indices = np.arange(start, start + test_size, 1)
         train_indices = [x for x in np.arange(len(Xt)) if x not in test_indices]
         
-        ys = (0.2*f1 + 0.8*f2 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
-        yt = (0.8*f1 + 0.2*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1)
+        ys = (fs + f2 + 0.3*f1 + np.random.normal(0, 0.1, len(Xs))).reshape(-1, 1)
+        yt = (fs + 0.2*f2 + np.random.normal(0, 0.1, len(Xt))).reshape(-1, 1) 
         yt_train_full = yt[train_indices]
         Xt_train_full = Xt[train_indices]
         yt_test_full = yt[test_indices]
@@ -63,7 +88,6 @@ for i in range(10):
 
         test_size = int(int(len(Xt_ds)) * 0.25)
         start = int(0.45*len(Xt_ds))
-        print(start, start+test_size)
         test_indices = np.arange(start, start + test_size, 1)
         train_indices = [x for x in np.arange(len(Xt_ds)) if x not in test_indices]
         yt_train_ds = yt_ds[train_indices] 
@@ -93,7 +117,7 @@ for i in range(10):
                 source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()
             )
 
-            nIVS = 20 * output_dim
+            nIVS = 50 * output_dim
             ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
             iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
             iv_ind = np.concatenate(iv_ind) 
@@ -106,7 +130,7 @@ for i in range(10):
             lik = gpf.likelihoods.SwitchedLikelihood(
                 [l1 if i != target_index else l2 for i in range(output_dim)]
             )
-            # now build the GP model as normal
+            # Model 2: SVGP
             model2 =  gpf.models.SVGP(kernel=kern, likelihood=lik, num_data=len(X), inducing_variable=LMCInducingPointsBase(ivs))
 
             t = time.time()
@@ -115,12 +139,10 @@ for i in range(10):
                 model2.training_loss_closure((X, y)),
                 model2.trainable_variables,
                 method="L-BFGS-B",
-                options={"maxiter":50}
             )
             dt_svgp = time.time() - t
 
-            print("SVGP took", dt_svgp)
-
+            ### Model 1: Sparse CMOGP
             # base kernel
             k = get_kernel() 
 
@@ -135,14 +157,21 @@ for i in range(10):
             iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
             iv_ind = np.concatenate(iv_ind)  
             ivs = ivs[shuffle]
+            shuffle = np.random.permutation(np.arange(len(ivs)))
             ivs = np.hstack((ivs, iv_ind))
             
-            model1 = SparseCMOGP((X, y), conditioning_index=target_index, exact_target=False, kernel=kern, jitter=1e-5, inducing_variable=LMCInducingPointsBase(ivs), likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
+            model1 = SparseCMOGP((X, y), conditioning_index=target_index, exact_target=False, kernel=kern, jitter=1e-6, inducing_variable=LMCInducingPointsBase(ivs), likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
 
             t = time.time()
             optimize(model1)
             dt_scmogp = time.time() - t
 
+            ### Model 3: SGPR
+            ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
+            iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
+            iv_ind = np.concatenate(iv_ind)  
+            ivs = ivs[shuffle]
+            ivs = np.hstack((ivs, iv_ind))
             if j == 0:
                 model3 = gpf.models.SGPR((Xt_train_full[:,0][:,None], yt_train_full[:,0][:,None]), kernel=gpf.kernels.Matern32(), inducing_variable=ivs[:,0][:,None])
             else:
@@ -151,19 +180,43 @@ for i in range(10):
             t = time.time()
             optimize(model3)
             dt_sgpr = time.time() - t
+
+            ### Model 4: GP-FITC
+            k = get_kernel() 
+
+            # coregion kernel
+            coreg = gpf.kernels.Coregion(
+                output_dim=output_dim, rank=rank, active_dims=[1] 
+            )
+
+            kern = k * coreg 
+
+            ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
+            iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
+            iv_ind = np.concatenate(iv_ind)  
+            shuffle = np.random.permutation(np.arange(len(ivs)))
+            ivs = ivs[shuffle]
+            ivs = np.hstack((ivs, iv_ind))
+
+            model4 =  gpf.models.GPRFITC((X, y), kernel=kern, inducing_variable=LMCInducingPointsBase(ivs))
+            t = time.time()
+            # fit the covariance function parameters
+            optimize(model4)
+            dt_gpfitc = time.time() - t
+            
             
             plt.rcParams["font.family"] = "serif"
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 8))
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
 
-            for n, (model, ax) in enumerate(zip((model1, model2), (ax1, ax2))):
-                fmean, fvar = model.predict_f(np.hstack((Xs, np.ones_like(Xs))))
+            for n, (name, model, ax) in enumerate(zip(["sCMOGP", "SVGP", "SGPR", "GPFITC"], (model1, model2, model3, model4), (ax1, ax2, ax3, ax4))):
+                fmean, fvar = model.predict_f(np.hstack((Xs, np.ones_like(Xs)))) if n != 2 else model.predict_f(Xs[:,0][:,None])
                 ax.plot(Xs, ys, color="C0", label="source")
                 if j == 1:
                     ax.plot(Xt_train_ds, yt_train_ds, color="C1", label="train target")
                 else:
                     ax.plot(Xt_train_full, yt_train_full, color="C1", label="train target")
                 ax.plot(Xt_test_ds, yt_test_ds, marker="o", lw=0, color="black", label="test target")
-                ax.plot(Xs, fmean, color="black", label="predicted f (target)")
+                ax.plot(Xs, fmean[:,0], color="black", label="predicted f (target)")
                 ax.fill_between(
                     Xs[:, 0],
                     (fmean[:,0] - 2 * np.sqrt(fvar[:,0])),
@@ -174,31 +227,49 @@ for i in range(10):
                     label = "$\pm 2\sigma$"
                 )
                 ax.tick_params(axis="both", labelsize=15)
-                ax.set_title("sCMOGP" if n == 0 else "SVGP", fontsize=25)
-                ax.set_xlabel("x", fontsize=20)
-                ax.set_ylabel("y", fontsize=20)
+                ax.set_xlabel("" if n in (0, 1) else "x", fontsize=20)
+                ax.set_ylabel(""if n in (1, 3) else "y", fontsize=20)
+                ax.set_title(name, fontsize=25)
+                ax1.sharex(ax3)
+                ax2.sharex(ax4)
             plt.legend(fontsize=15)
 
             mode = "dense" if j == 0 else "sparse"
             plt.suptitle(f"fit with {mode} target data", fontsize=30)
-            plt.savefig(f"experiments/toy-example/figures/dataset-{i}-{mode}")
+            plt.savefig(f"experiments/toy-example/figures/target{int(target_proportion/0.01)}/dataset-{i}-{mode}")
+
+            # plt.show()
 
             fmean_test, fvar_test = model1.predict_f(np.hstack((Xtest, np.ones_like(Xtest))))
             mse = mean_squared_error(ytest, fmean_test[:,0])
             scmogp_time[i, j] = dt_scmogp
             scmogp_mse[i, j] = mse
-            print(model1, mse, "fit in", dt_scmogp)
+            print(model1, "mse", mse, "fit in", dt_scmogp)
 
             fmean_test, fvar_test = model2.predict_f(np.hstack((Xtest, np.ones_like(Xtest))))
             mse = mean_squared_error(ytest, fmean_test[:,0])
-            print(model2, mse, "fit in", dt_svgp)
+            print(model2, "mse", mse, "fit in", dt_svgp)
             svgp_time[i, j] = dt_svgp
             svgp_mse[i, j] = mse
 
             fmean_test, fvar_test = model3.predict_f(Xtest)
             mse = mean_squared_error(ytest, fmean_test[:,0])
-            print(model3, mse, "fit in", dt_sgpr)
+            print(model3, "mse", mse, "fit in", dt_sgpr)
             sgpr_time[i, j] = dt_sgpr
             sgpr_mse[i, j] = mse
 
-np.savez(f"toy-example-interpolation-{target_proportion}", svgp=svgp_mse, scmogp=scmogp_mse, sgpr=sgpr_mse, scmogp_time=dt_scmogp, svgp_time=dt_svgp, sgpr_time=dt_sgpr)
+            fmean_test, fvar_test = model4.predict_f(np.hstack((Xtest, np.ones_like(Xtest))))
+            mse = mean_squared_error(ytest, fmean_test[:,0])
+            print(model4, "mse", mse, "fit in", dt_gpfitc)
+            gpfitc_time[i, j] = dt_gpfitc
+            gpfitc_mse[i, j] = mse
+            
+            # for i, model in enumerate([model1, model2]):
+            #     ymean_all, yvar_all = model.predict_y(np.hstack((Xt, np.ones_like(Xt))))
+            #     ence = expected_nce(yt.flatten(), ymean_all[:,0], yvar_all)
+            #     print(str(model), np.mean(ence))
+            #     plt.plot(ence, label=str(model))
+            #     plt.legend()
+            # plt.show()
+
+np.savez(f"experiments/toy-example/toy-example-interpolation-{target_proportion}", svgp=svgp_mse, scmogp=scmogp_mse, sgpr=sgpr_mse, gpfitc=gpfitc_mse, scmogp_time=dt_scmogp, svgp_time=dt_svgp, sgpr_time=dt_sgpr, gpfitc_time=dt_gpfitc)
