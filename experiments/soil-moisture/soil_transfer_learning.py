@@ -10,13 +10,13 @@ tf.random.set_seed(42)
 np.random.seed(42)
 from pathlib import Path
 home = Path.home()
-subdir = home / "src" / "at-gpflow" / "experiments" / "soil-moisture" / "Wageningen" ## or whatever folder at-gpflow lives in
-at_dir = home / "src" / "at-gpflow"
+at_dir = Path(__file__).resolve().parents[2]  # repo root, where atmodel.py lives
+subdir = at_dir / "experiments" / "soil-moisture" / "Wageningen" ## or whatever folder at-gpflow lives in
 sys.path.append(str(at_dir))
 sys.path.append(str(subdir))
 from itertools import combinations
 
-from robust_svgp import LMCInducingPointsBase
+from inducing_variable import LMCInducingPointsBase
 
 from sklearn.metrics import mean_squared_error
 from matplotlib import color_sequences
@@ -25,9 +25,6 @@ from atmodel import SparseCMOGP, ConditionalMOGP
 from atlikelihood import TransferLikelihood
 import gpflow as gpf
 
-
-sys.path.append(str(at_dir))
-sys.path.append(str(subdir))
 BASE = str(subdir)
 
 def get_kernel():
@@ -60,16 +57,16 @@ def optimize(m):
 
 # Experiment 1: different substations using multiple depths
 
-triples = [("04", "01"), 
+tuples = [("04", "01"), 
          ("14", "15"),
          ("05", "07"),
          ("09", "10")]
 
 
-pair_index = 2
-station_indices = [np.repeat(triple, 2) for triple in triples]
+pair_index = sys.argv[1] if len(sys.argv) > 1 else 0
+station_indices = [np.repeat(tup, 2) for tup in tuples]
 print(station_indices)
-depths = np.concatenate([[5, 10] for t in triples[pair_index]])
+depths = np.concatenate([[5, 10] for t in tuples[pair_index]])
 substations = []
 
 for station, depth in zip(station_indices[pair_index], depths):
@@ -282,5 +279,5 @@ for nIVS in niv_list:
 
 import json
 # Write dictionary to JSON file
-with open(f"{exp_name}.json", "w") as file:
+with open(f"results/{exp_name}.json", "w") as file:
     json.dump(result_dict, file)

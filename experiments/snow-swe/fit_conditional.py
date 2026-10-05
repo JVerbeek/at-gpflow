@@ -1,4 +1,4 @@
-"""Simple fit of the conditional MOGP on the snow data
+""" Fits sCMOGP and GPFITC on the a holdout year 50 times. Holdout year used for the paper is 2019.
 
 Sources: three daily SNOTEL pillows (output indices 0, 1, 2). Target: Shrine Pass snow course (index 3).
 Winters 2011-2020, November to May only, pillows thinned to every 2nd day. One winter of course
@@ -20,11 +20,10 @@ np.random.seed(42)
 
 at_dir = Path(__file__).resolve().parents[2]  # repo root, where atmodel.py lives
 sys.path.append(str(at_dir))
-from atmodel import ConditionalMOGP, SparseCMOGP, WeightedSparseCMOGP
-from spectral_mixture import SpectralMixture
+from atmodel import ConditionalMOGP, SparseCMOGP
 
 from atlikelihood import TransferLikelihood
-from robust_svgp import LMCInducingPointsBase
+from inducing_variable import LMCInducingPointsBase
 from sklearn.metrics import mean_squared_error
 from matplotlib import color_sequences
 
@@ -64,12 +63,6 @@ n_src = len(d["source_labels"])
 colors = color_sequences["Set2"]
 source_names = {0:"Copper Mountain", 1:"Vail Mountain", 2:"Fremont Pass"}
 
-t, y = d["target_t"], d["target_y"]
-t, y = t[in_season(t)], y[in_season(t)]
-test = water_year(t) == HOLDOUT
-Xtest, ytest = t[test].reshape(-1, 1), y[test].reshape(-1, 1)
-data_X.append(t[~test].reshape(-1, 1))
-data_Y.append(y[~test].reshape(-1, 1))
 
 for i in range(n_src):
     t, y = d[f"source{i}_t"], d[f"source{i}_y"]
@@ -79,6 +72,14 @@ for i in range(n_src):
     data_Y_perturbed.append(y.reshape(-1, 1) + np.random.multivariate_normal(np.zeros(len(t)), k(t[:,None])).reshape(-1, 1))
     data_Y.append(y.reshape(-1, 1))
 
+t, y = d["target_t"], d["target_y"]
+t, y = t[in_season(t)], y[in_season(t)]
+test = water_year(t) == HOLDOUT
+Xtest, ytest = t[test].reshape(-1, 1), y[test].reshape(-1, 1)
+data_X.append(t[~test].reshape(-1, 1))
+data_Y.append(y[~test].reshape(-1, 1))
+
+# Reproduces Figure 6 from the paper
 plt.rcParams["font.family"] = "serif"
 fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(9, 6))
 for i, (dx, dy) in enumerate(zip(data_X, data_Y)):
@@ -95,13 +96,12 @@ ax2.plot(data_X[-1], data_Y[-1], color="red", lw=0, marker="o", label="Shrine Pa
 ax1.plot(data_X[-1], data_Y[-1], color="red", lw=0, marker="o", label="Shrine Pass (course)")
 ax1.legend(fontsize=10, loc="upper right")
 ax2.set_title("Perturbed SWE", fontsize=20)
-ax1.set_title("SWE", fontsize=20)
-fig.suptitle("SWE from 2011-2021 for various substations", fontsize=20)
+ax1.set_title("Unperturbed SWE", fontsize=20)
 plt.xticks(ticks=np.arange(2011, 2021), labels=labels)
 plt.tick_params("both", labelsize=15)
-plt.savefig("experiments/snow-swe/perturbed_normal.png")
+plt.savefig("experiments/snow-swe/figures/perturbed_normal.png")
 plt.show()
-sys.exit()
+
 
 # standardize each output and build the stacked (value, index) arrays
 means, stds = [Y.mean() for Y in data_Y], [Y.std() for Y in data_Y]
@@ -109,18 +109,17 @@ X = np.vstack([np.hstack((Xi, i * np.ones_like(Xi))) for i, Xi in enumerate(data
 y = np.vstack([np.hstack((((Yi - m) / s), i * np.ones_like(Yi))) for i, (Yi, m, s) in enumerate(zip(data_Y, means, stds))])
 print(f"{len(X)} training points, target index {n_src}, held-out winter {HOLDOUT} with {len(Xtest)} readings")
 print(f"{len(X[X[:,1] == n_src])} target points")
-# ----------------------------------------------------------------------------- model: full conditional
+
+# Predefine some values common to both models
 output_dim = n_src + 1  # Number of outputs
 rank = 1  # Rank of W
 condition_index = n_src  # the snow course
 nIVS = 50 * output_dim
-# ----------------------------------------------------------------------------- model: sparse conditional
+# ======================================================================================[sCMOGP]
 
 rounds = 50
 
 for r in range(rounds):
-    output_dim = n_src + 1  # Number of outputs
-    rank = 1 # Rank of W
     condition_index = n_src  # the snow course
 
     # Base kernel
@@ -142,92 +141,7 @@ for r in range(rounds):
                             likelihood=TransferLikelihood(source=gpf.likelihoods.Gaussian(), target=gpf.likelihoods.Gaussian()))
     optimize(model2)
 
-
-# # ----------------------------------------------------------------------------- model: sparse variational
-# # Base kernel
-# k = get_kernel()
-
-# # Coregion kernel
-# coreg = gpf.kernels.Coregion(
-#     output_dim=output_dim, rank=rank, active_dims=[1]
-# )
-
-# ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
-# iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
-# iv_ind = np.concatenate(iv_ind)  # I guess the IPs for the target don't matter here, but this makes the comparison fair.
-# shuffle = np.random.permutation(np.arange(len(ivs)))
-# ivs = ivs[shuffle]
-# ivs = np.hstack((ivs, iv_ind))
-
-# kern = k * coreg
-# l1 = gpf.likelihoods.Gaussian()
-# l2 = gpf.likelihoods.Gaussian()
-# lik = gpf.likelihoods.SwitchedLikelihood(
-#     [l1 if i != condition_index else l2 for i in range(output_dim)]
-# )
-# # now build the GP model as normal
-# model3 =  gpf.models.SVGP(kernel=kern, likelihood=lik, num_data=len(X), inducing_variable=LMCInducingPointsBase(ivs))
-
-
-# gpf.utilities.print_summary(model3)
-# # fit the covariance function parameters
-# gpf.optimizers.Scipy().minimize(
-#     model3.training_loss_closure((X, y)),
-#     model3.trainable_variables,
-#     method="L-BFGS-B",
-#     options={"maxiter":100}
-# )
-# gpf.utilities.print_summary(model3)
-# # ----------------------------------------------------------------------------- model: sgpr
-# # Base kernel
-# k = get_kernel()
-# # Coregion kernel
-
-# ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
-# iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
-# iv_ind = np.concatenate(iv_ind)  # I guess the IPs for the target don't matter here, but this makes the comparison fair.
-# ivs = ivs[shuffle]
-# ivs = ivs
-
-# l1 = gpf.likelihoods.Gaussian()
-
-# # now build the GP model as normal
-# model4 =  gpf.models.SGPR((X[X[:,0] == condition_index][:,0].reshape(-1, 1), y[X[:,0] == condition_index][:,0].reshape(-1, 1)), kernel=k, likelihood=l1, inducing_variable=ivs)
-
-
-# gpf.utilities.print_summary(model4)
-# # fit the covariance function parameters
-# gpf.optimizers.Scipy().minimize(
-#     model4.training_loss,
-#     model4.trainable_variables,
-#     method="L-BFGS-B",
-# )
-# gpf.utilities.print_summary(model4)
-
-
-# ----------------------------------------------------------------------------- model: gpfitc
-# k = get_kernel()
-# # coregion kernel
-# coreg = gpf.kernels.Coregion(
-#     output_dim=output_dim, rank=rank, active_dims=[1] 
-# )
-
-# kern = k * coreg 
-
-# ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
-# iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
-# iv_ind = np.concatenate(iv_ind)  
-# ivs = ivs[shuffle]
-# ivs = np.hstack((ivs, iv_ind))
-
-# model5 =  gpf.models.GPRFITC((X, y), kernel=kern, inducing_variable=LMCInducingPointsBase(ivs))
-
-# # fit the covariance function parameters
-# optimize(model5)
-# gpf.utilities.print_summary(model5)
-
-# ----------------------------------------------------------------------------- model: gpfitc
-
+    #================================================================================= [GPFITC]
     ivs = np.linspace(np.min(X[:,0]), np.max(X[:,0]), nIVS).reshape(-1, 1)
     iv_ind = [j * np.ones((int(nIVS/output_dim), 1)) for j in range(output_dim)]
     iv_ind = np.concatenate(iv_ind)  
