@@ -243,25 +243,26 @@ print(f"  Saved {OUT_DIR / 'fig5_5cm_interstation_correlation.png'}")
 # ══════════════════════════════════════════════════════════════════════════════
 
 print("Plotting Figure 6: Cross-depth correlation (RM01)...")
-df01 = raw["RM_SM_14"][VWC_COLS].resample("D").mean()
-df01.columns = [f"{d} cm" for d in DEPTHS]
-corr_depth = df01.corr()
+for station in range(1, 16, 1):
+    name = f"0{station}" if station < 10 else f"{station}"
+    df01 = raw[f"RM_SM_{name}"][VWC_COLS].resample("D").mean()
+    df01.columns = [f"{d} cm" for d in DEPTHS]
+    corr_depth = df01.corr()
 
-fig, ax = plt.subplots(figsize=(6, 5))
-im = ax.imshow(corr_depth.values, cmap="RdBu_r", vmin=0.3, vmax=1)
-ax.set_xticks(range(5))
-ax.set_xticklabels([f"{d} cm" for d in DEPTHS])
-ax.set_yticks(range(5))
-ax.set_yticklabels([f"{d} cm" for d in DEPTHS])
-for i in range(5):
-    for j in range(5):
-        ax.text(j, i, f"{corr_depth.values[i, j]:.2f}", ha="center", va="center", fontsize=9)
-plt.colorbar(im, ax=ax, shrink=0.8)
-ax.set_title("Cross-Depth Correlation (RM01, daily avg)\nMulti-output over depth layers",
-             fontweight="bold")
-fig.tight_layout()
-fig.savefig(OUT_DIR / "fig6_crossdepth_correlation.png", bbox_inches="tight")
-print(f"  Saved {OUT_DIR / 'fig6_crossdepth_correlation.png'}")
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(corr_depth.values, cmap="RdBu_r", vmin=0.3, vmax=1)
+    ax.set_xticks(range(5))
+    ax.set_xticklabels([f"{d} cm" for d in DEPTHS])
+    ax.set_yticks(range(5))
+    ax.set_yticklabels([f"{d} cm" for d in DEPTHS])
+    for i in range(5):
+        for j in range(5):
+            ax.text(j, i, f"{corr_depth.values[i, j]:.2f}", ha="center", va="center", fontsize=9)
+    plt.colorbar(im, ax=ax, shrink=0.8)
+    ax.set_title(f"Cross-Depth Correlation (RM{station}, daily avg)\nMulti-output over depth layers")
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / f"crossdepth/fig6_{station}_correlation.png", bbox_inches="tight")
+    print(f"  Saved {OUT_DIR / f'crossdepth/fig6_{station}_correlation.png'}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FIGURE 7: Station map colored by soil type + crop diversity
@@ -380,7 +381,7 @@ x_min, y_min = m(lon_min, lat_min)
 x_max, y_max = m(lon_max, lat_max)
 
 square = plt.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, 
-                        fill=False, edgecolor='red', linewidth=2, label='Raam catchment aqrea')
+                        fill=False, edgecolor='red', linewidth=2, label='Raam catchment area')
 
 plt.gca().add_patch(square)
 

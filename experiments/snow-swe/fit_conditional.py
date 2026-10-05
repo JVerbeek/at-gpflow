@@ -13,6 +13,7 @@ import numpy as np
 import tensorflow as tf
 import gpflow as gpf
 import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
 
 tf.random.set_seed(42)
 np.random.seed(42)
@@ -57,35 +58,62 @@ def optimize(m):
 rmse_dict = {"sCMOGP":[],"GPFITC":[]}
 
 print("=*"*30, HOLDOUT, "+*"*30)
-data_X, data_Y = [], []
+data_X, data_Y, data_Y_perturbed = [], [], []
 n_src = len(d["source_labels"])
 
-for i in range(n_src):
-    t, y = d[f"source{i}_t"], d[f"source{i}_y"]
-    t, y = t[in_season(t)][::2], y[in_season(t)][::2]
-    data_X.append(t.reshape(-1, 1))
-    data_Y.append(y.reshape(-1, 1))
+colors = color_sequences["Set2"]
+source_names = {0:"Copper Mountain", 1:"Vail Mountain", 2:"Fremont Pass"}
+
 t, y = d["target_t"], d["target_y"]
 t, y = t[in_season(t)], y[in_season(t)]
 test = water_year(t) == HOLDOUT
 Xtest, ytest = t[test].reshape(-1, 1), y[test].reshape(-1, 1)
 data_X.append(t[~test].reshape(-1, 1))
 data_Y.append(y[~test].reshape(-1, 1))
-plt.plot(t[~test], np.random.multivariate_normal(np.zeros(t[~test].shape[0]), get_kernel()(t[~test][:,None])))
+
+for i in range(n_src):
+    t, y = d[f"source{i}_t"], d[f"source{i}_y"]
+    t, y = t[in_season(t)][::2], y[in_season(t)][::2]
+    data_X.append(t.reshape(-1, 1))
+    k = gpf.kernels.RBF(lengthscales=0.3, variance=5)
+    data_Y_perturbed.append(y.reshape(-1, 1) + np.random.multivariate_normal(np.zeros(len(t)), k(t[:,None])).reshape(-1, 1))
+    data_Y.append(y.reshape(-1, 1))
+
+plt.rcParams["font.family"] = "serif"
+fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(9, 6))
+for i, (dx, dy) in enumerate(zip(data_X, data_Y)):
+    ax1.plot(dx, dy, color=colors[i], label=source_names[i]+" (pillow)", lw=3) if i < 3 else None
+for j, (dx, dy) in enumerate(zip(data_X, data_Y_perturbed)):
+    ax2.plot(dx, dy, color=colors[j], lw=3, label=source_names[j]+" (pillow)") if j < 3 else None
+ax2.set_ylabel("SWE", fontsize=20)
+ax1.set_ylabel("SWE", fontsize=20)
+plt.xlabel("year", fontsize=20)
+
+labels = [str(i) for i in np.arange(2011, 2021, 1)]
+ax2.tick_params("x", labelbottom=True)
+ax2.plot(data_X[-1], data_Y[-1], color="red", lw=0, marker="o", label="Shrine Pass (course)")
+ax1.plot(data_X[-1], data_Y[-1], color="red", lw=0, marker="o", label="Shrine Pass (course)")
+ax1.legend(fontsize=10, loc="upper right")
+ax2.set_title("Perturbed SWE", fontsize=20)
+ax1.set_title("SWE", fontsize=20)
+fig.suptitle("SWE from 2011-2021 for various substations", fontsize=20)
+plt.xticks(ticks=np.arange(2011, 2021), labels=labels)
+plt.tick_params("both", labelsize=15)
+plt.savefig("experiments/snow-swe/perturbed_normal.png")
 plt.show()
+sys.exit()
 
 # standardize each output and build the stacked (value, index) arrays
 means, stds = [Y.mean() for Y in data_Y], [Y.std() for Y in data_Y]
 X = np.vstack([np.hstack((Xi, i * np.ones_like(Xi))) for i, Xi in enumerate(data_X)])
-y = np.vstack([np.hstack(((Yi - m) / s, i * np.ones_like(Yi))) for i, (Yi, m, s) in enumerate(zip(data_Y, means, stds))])
+y = np.vstack([np.hstack((((Yi - m) / s), i * np.ones_like(Yi))) for i, (Yi, m, s) in enumerate(zip(data_Y, means, stds))])
 print(f"{len(X)} training points, target index {n_src}, held-out winter {HOLDOUT} with {len(Xtest)} readings")
 print(f"{len(X[X[:,1] == n_src])} target points")
 # ----------------------------------------------------------------------------- model: full conditional
 output_dim = n_src + 1  # Number of outputs
 rank = 1  # Rank of W
 condition_index = n_src  # the snow course
-nIVS = 100 * output_dim
-
+nIVS = 50 * output_dim
 # ----------------------------------------------------------------------------- model: sparse conditional
 
 rounds = 50
@@ -226,10 +254,14 @@ for r in range(rounds):
             mse = mean_squared_error(ytest, fmean_test[:, 0])
         except ValueError:
             continue
+        print(model, mse)
         rmse_dict[names[i]].append(mse)
 
 
-print([(k, np.mean(v)) for (k, v) in rmse_dict.items()])
+print([(k, np.mean(v), np.std(v)) for (k, v) in rmse_dict.items()])
+import json
+# Serialize data into file:
+json.dump(rmse_dict, open(f"experiments/snow-swe/2019-{int(nIVS/output_dim)}-perturbed.json", 'w' ) )
 #----------------------------------------------------------------------------- predictions
 colors = color_sequences["Set2"]
 lo, hi = HOLDOUT - 1 + 10 / 12, HOLDOUT + 6 / 12  # plot the held-out winter only

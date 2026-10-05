@@ -56,7 +56,7 @@ if __name__ == "__main__":
     arrays = {"target_t": decimal_year(tgt.index), "target_y": tgt.values, "target_label": TARGET[1]}
     for i, (triplet, label) in enumerate(SOURCES):
         src = fetch(triplet, "DAILY")
-        print(f"source  {label}: {len(src)} daily values, {src.index.min().date()} .. {src.index.max().date()}")
+        print(f"source {i} {label}: {len(src)} daily values, {src.index.min().date()} .. {src.index.max().date()}")
         arrays[f"source{i}_t"] = decimal_year(src.index)
         arrays[f"source{i}_y"] = src.values
     arrays["source_labels"] = np.array([label for _, label in SOURCES])
