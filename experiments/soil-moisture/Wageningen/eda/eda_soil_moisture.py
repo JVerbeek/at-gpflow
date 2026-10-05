@@ -279,18 +279,18 @@ bofek_codes = coords.merge(
 unique_bofek = sorted(bofek_codes["BOFEK"].unique())
 bofek_cmap = {b: plt.cm.Set2(i / len(unique_bofek)) for i, b in enumerate(unique_bofek)}
 
-# for _, row in bofek_codes.iterrows():
-#     ax.scatter(row["Longitude_deg"], row["Latitude_deg"],
-#                c=[bofek_cmap[row["BOFEK"]]], s=100, edgecolors="k", zorder=5)
-#     ax.annotate(row["Name"], (row["Longitude_deg"], row["Latitude_deg"]),
-#                 textcoords="offset points", xytext=(5, 5), fontsize=7)
-# # Legend
-# for b in unique_bofek:
-#     ax.scatter([], [], c=[bofek_cmap[b]], s=60, edgecolors="k", label=f"BOFEK {b}")
-# ax.legend(loc="lower left", fontsize=7)
-# ax.set_xlabel("Longitude")
-# ax.set_ylabel("Latitude")
-# ax.set_title("(a) Stations by BOFEK Soil Type", fontweight="bold")
+for _, row in bofek_codes.iterrows():
+    ax.scatter(row["Latitude_deg"], row["Longitude_deg"],
+               c=[bofek_cmap[row["BOFEK"]]], s=100, edgecolors="k", zorder=5)
+    ax.annotate(row["Name"], (row["Longitude_deg"], row["Latitude_deg"]),
+                textcoords="offset points", xytext=(5, 5), fontsize=7)
+# Legend
+for b in unique_bofek:
+    ax.scatter([], [], c=[bofek_cmap[b]], s=60, edgecolors="k", label=f"BOFEK {b}")
+ax.legend(loc="lower left", fontsize=7)
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+ax.set_title("(a) Stations by BOFEK Soil Type", fontweight="bold")
 
 # Panel b: by dominant crop
 crop_2016 = crops.set_index("Stn")["2016"].to_dict()
@@ -310,89 +310,87 @@ fig.tight_layout()
 fig.savefig(OUT_DIR / "fig7_station_map.png", bbox_inches="tight")
 print(f"  Saved {OUT_DIR / 'fig7_station_map.png'}")
 
-plt.clf()
+# import plotly.graph_objects as go
+# print(lats, longs)
+# fig = go.Figure(go.Scattermap(
+#         lat=longs,
+#         lon=lats,
+#         mode='markers+text',
+#         marker=go.scattermap.Marker(
+#             size=15
+#         ),
+#         text=names,
+#         textposition="bottom right",
+#     ))
 
-import plotly.graph_objects as go
-print(lats, longs)
-fig = go.Figure(go.Scattermap(
-        lat=longs,
-        lon=lats,
-        mode='markers+text',
-        marker=go.scattermap.Marker(
-            size=15
-        ),
-        text=names,
-        textposition="bottom right",
-    ))
+# fig.update_layout(
+#     autosize=True,
+#     map=dict(
+#         style="outdoors",
+#         bearing=0,
+#         center=dict(
+#             lat=51.633,
+#             lon=5.78
+#         ),
+#         pitch=0,
+#         zoom=10
+#     ),
+#     font=dict(
+#         family="Serif, serif",
+#         size=15,  # Set the font size here
+#     )
+# )
 
-fig.update_layout(
-    autosize=True,
-    map=dict(
-        style="outdoors",
-        bearing=0,
-        center=dict(
-            lat=51.633,
-            lon=5.78
-        ),
-        pitch=0,
-        zoom=10
-    ),
-    font=dict(
-        family="Serif, serif",
-        size=15,  # Set the font size here
-    )
-)
+# fig.show()
 
-fig.show()
+# import matplotlib.pyplot as plt
+# from mpl_toolkits.basemap import Basemap
+# import numpy as np
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.basemap import Basemap
-import numpy as np
+# # Create the basemap for the Netherlands
+# m = Basemap(
+#     projection='merc',
+#     llcrnrlat=50.7,      # Lower left corner latitude
+#     urcrnrlat=53.5,      # Upper right corner latitude
+#     llcrnrlon=3.3,       # Lower left corner longitude
+#     urcrnrlon=7.3,       # Upper right corner longitude
+#     resolution='l'       # High resolution
+# )
 
-# Create the basemap for the Netherlands
-m = Basemap(
-    projection='merc',
-    llcrnrlat=50.7,      # Lower left corner latitude
-    urcrnrlat=53.5,      # Upper right corner latitude
-    llcrnrlon=3.3,       # Lower left corner longitude
-    urcrnrlon=7.3,       # Upper right corner longitude
-    resolution='l'       # High resolution
-)
+# # Draw map features
+# m.drawcoastlines(linewidth=1.5)
+# m.drawcountries(linewidth=1)
+# m.drawstates(linewidth=0.5)
 
-# Draw map features
-m.drawcoastlines(linewidth=1.5)
-m.drawcountries(linewidth=1)
-m.drawstates(linewidth=0.5)
+# # Add map background
+# m.drawmapboundary(fill_color='lightblue')
+# m.fillcontinents(color='lightgray', lake_color='lightblue')
 
-# Add map background
-m.drawmapboundary(fill_color='lightblue')
-m.fillcontinents(color='lightgray', lake_color='lightblue')
+# # Define the square size (in degrees)
+# square_size = 0.5  # Approximately 55 km on each side
 
-# Define the square size (in degrees)
-square_size = 0.5  # Approximately 55 km on each side
+# # Calculate the corners of the square
+# lon_min = min(lats) 
+# lon_max = max(lats)
+# lat_min = min(longs)
+# lat_max = max(longs)
 
-# Calculate the corners of the square
-lon_min = min(lats) 
-lon_max = max(lats)
-lat_min = min(longs)
-lat_max = max(longs)
+# x_min, y_min = m(lon_min, lat_min)
+# x_max, y_max = m(lon_max, lat_max)
 
-x_min, y_min = m(lon_min, lat_min)
-x_max, y_max = m(lon_max, lat_max)
+# square = plt.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, 
+#                         fill=False, edgecolor='red', linewidth=2, label='Raam catchment area')
 
-square = plt.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, 
-                        fill=False, edgecolor='red', linewidth=2, label='Raam catchment area')
+# plt.gca().add_patch(square)
 
-plt.gca().add_patch(square)
+# plt.title('Raam catchment area in the Netherlands', fontsize=16)
+# plt.legend(loc='upper left')
 
-plt.title('Raam catchment area in the Netherlands', fontsize=16)
-plt.legend(loc='upper left')
+# m.drawmeridians(np.arange(3, 8, 1), labels=[0,0,0,1])
+# m.drawparallels(np.arange(50, 54, 1), labels=[1,0,0,0])
 
-m.drawmeridians(np.arange(3, 8, 1), labels=[0,0,0,1])
-m.drawparallels(np.arange(50, 54, 1), labels=[1,0,0,0])
-
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.show()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FIGURE 8: Temporal scales — autocorrelation at different depths
