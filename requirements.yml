@@ -1,34 +1,30 @@
-name: dev
+name: sparse-conditional-gp
 
 channels:
   - conda-forge
+  - conda
 
 dependencies:
   - python=3.11
-  - numpy=1.24
+  - numpy=1.23
   - pandas=2.3
   - scipy=1.15
   - scikit-learn=1.7
-  - matplotlib
+  - matplotlib=3.10
   - seaborn
-  - plotly
   - numba
   - statsmodels
   - tslearn
-  - yfinance
   - beautifulsoup4
   - lxml
   - requests
   - ipykernel
-  - r-base=4.4
-  - rpy2=3.6
+  - ipython=9.5.0
+  - typing_extensions
+  - setuptools=81.0
   - pip
 
   - pip:
-      - tensorflow==2.12.1
+      - tensorflow==2.12.0
       - tensorflow-probability==0.20.1
       - gpflow==2.10.0
-      - ucimlrepo==0.0.7
-      - pyseq==2026.0.0
-      - pyseq-data==0.0.1
-prefix: /home/janneke/miniforge3/envs/dev
